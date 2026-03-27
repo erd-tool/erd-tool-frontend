@@ -1,0 +1,32 @@
+{
+  "name": "erd-tool-frontend",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@xyflow/react": "^12.6.0",
+    "html-to-image": "^1.11.13",
+    "lucide-react": "^0.469.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.30.1",
+    "y-websocket": "^1.5.4",
+    "yjs": "^13.6.24",
+    "zustand": "^5.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "playwright": "^1.58.2",
+    "playwright-core": "^1.58.2",
+    "typescript": "^5.7.3",
+    "vite": "^5.4.14"
+  }
+}
