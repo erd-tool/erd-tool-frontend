@@ -7,6 +7,7 @@ import {
 } from '../lib/dummy-data';
 import { createId, nowIso, storageKeys } from '../lib/storage';
 import type {
+  Cardinality,
   DocumentWorkspace,
   ErdDocument,
   ErdSummary,
@@ -50,7 +51,14 @@ interface AppState {
   addField: (entityId: string) => void;
   updateField: (entityId: string, fieldId: string, patch: Partial<FieldDefinition>) => void;
   removeField: (entityId: string, fieldId: string) => void;
-  addRelationship: (sourceEntityId?: string, targetEntityId?: string) => void;
+  addRelationship: (config?: {
+    sourceEntityId?: string;
+    targetEntityId?: string;
+    identifying?: boolean;
+    cardinality?: Cardinality;
+    required?: boolean;
+    memo?: string;
+  }) => string | void;
   updateRelationship: (relationshipId: string, patch: Partial<RelationshipDefinition>) => void;
   removeRelationship: (relationshipId: string) => void;
   addNote: () => void;
@@ -331,28 +339,38 @@ export const useAppStore = create<AppState>()(
         next.version += 1;
         get().replaceDocument(next);
       },
-      addRelationship: (sourceEntityId, targetEntityId) => {
+      addRelationship: (config) => {
         const active = findActiveWorkspace(get());
         if (!active?.workspace) return;
         const entities = active.workspace.document.entities;
         if (entities.length < 2) return;
-        const source = entities.find((item) => item.id === sourceEntityId) ?? entities[0];
-        const target = entities.find((item) => item.id === targetEntityId && item.id !== source.id) ?? entities[1];
+        const source = entities.find((item) => item.id === config?.sourceEntityId) ?? entities[0];
+        const target = entities.find((item) => item.id === config?.targetEntityId && item.id !== source.id) ?? entities[1];
         if (!source || !target || source.id === target.id) return;
 
         const next = structuredClone(active.workspace.document);
+        const relationId = createId('rel');
+        const targetEntity = next.entities.find((item) => item.id === target.id);
+        const targetField = targetEntity?.fields.find((field) => field.id === target.fields[0]?.id);
+        if (targetField && !targetField.primaryKey) {
+          targetField.nullable = !(config?.required ?? true);
+          targetField.foreignKey = `${source.name}.${source.fields[0]?.name ?? 'id'}`;
+        }
         next.relationships.push({
-          id: createId('rel'),
+          id: relationId,
           sourceEntityId: source.id,
           targetEntityId: target.id,
           sourceFieldId: source.fields[0]?.id,
           targetFieldId: target.fields[0]?.id,
-          cardinality: '1:N',
-          memo: ''
+          cardinality: config?.cardinality ?? '1:N',
+          identifying: config?.identifying ?? false,
+          required: config?.required ?? true,
+          memo: config?.memo ?? ''
         });
         next.updatedAt = nowIso();
         next.version += 1;
         get().replaceDocument(next);
+        return relationId;
       },
       updateRelationship: (relationshipId, patch) => {
         const active = findActiveWorkspace(get());
@@ -361,6 +379,13 @@ export const useAppStore = create<AppState>()(
         const relationship = next.relationships.find((item) => item.id === relationshipId);
         if (!relationship) return;
         Object.assign(relationship, patch);
+        if (patch.required !== undefined && relationship.targetEntityId && relationship.targetFieldId) {
+          const targetEntity = next.entities.find((item) => item.id === relationship.targetEntityId);
+          const targetField = targetEntity?.fields.find((field) => field.id === relationship.targetFieldId);
+          if (targetField && !targetField.primaryKey) {
+            targetField.nullable = !patch.required;
+          }
+        }
         next.updatedAt = nowIso();
         next.version += 1;
         get().replaceDocument(next);
@@ -369,6 +394,15 @@ export const useAppStore = create<AppState>()(
         const active = findActiveWorkspace(get());
         if (!active?.workspace) return;
         const next = structuredClone(active.workspace.document);
+        const relationship = next.relationships.find((item) => item.id === relationshipId);
+        if (relationship?.targetEntityId && relationship.targetFieldId) {
+          const targetEntity = next.entities.find((item) => item.id === relationship.targetEntityId);
+          const targetField = targetEntity?.fields.find((field) => field.id === relationship.targetFieldId);
+          if (targetField && !targetField.primaryKey) {
+            targetField.foreignKey = undefined;
+            targetField.nullable = true;
+          }
+        }
         next.relationships = next.relationships.filter((item) => item.id !== relationshipId);
         next.updatedAt = nowIso();
         next.version += 1;

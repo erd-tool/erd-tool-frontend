@@ -3,9 +3,10 @@ import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, TextareaHTML
 export function AppButton({
   className = '',
   variant = 'primary',
+  type = 'button',
   ...props
 }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'ghost' }) {
-  return <button className={`app-button ${variant} ${className}`} {...props} />;
+  return <button className={`app-button ${variant} ${className}`} type={type} {...props} />;
 }
 
 export function AppInput(props: InputHTMLAttributes<HTMLInputElement>) {
@@ -33,4 +34,3 @@ export function StatusPill({
 }) {
   return <span className={`status-pill ${tone}`}>{children}</span>;
 }
-

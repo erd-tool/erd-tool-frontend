@@ -58,6 +58,8 @@ export interface RelationshipDefinition {
   sourceFieldId?: string;
   targetFieldId?: string;
   cardinality: Cardinality;
+  identifying?: boolean;
+  required?: boolean;
   memo: string;
 }
 

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ComponentType } from 'react';
 import { useParams } from 'react-router-dom';
 import { Background, Controls, MiniMap, ReactFlow, ReactFlowProvider, type Edge, type Node } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
+import { Link2, MousePointerClick, Redo2, Save, Undo2 } from 'lucide-react';
 import { AppButton, AppCard, AppInput, AppLabel, AppTextarea, StatusPill } from '../../components/ui';
 import { exportSql, fetchErd, saveErd } from '../../lib/api';
 import { downloadText, formatDate, nowIso } from '../../lib/storage';
@@ -10,9 +11,33 @@ import { useYjsCollaboration } from '../../lib/yjs';
 import { useAppStore } from '../../state/app-store';
 import { EntityNode } from './EntityNode';
 import { toPng } from 'html-to-image';
-import type { Dialect, ErdDocument, RelationshipDefinition } from '../../lib/types';
+import type { Cardinality, Dialect, ErdDocument, RelationshipDefinition } from '../../lib/types';
 
 const nodeTypes = { entityNode: EntityNode as unknown as ComponentType<any> };
+
+interface RelationshipDraft {
+  active: boolean;
+  sourceEntityId: string | null;
+  targetEntityId: string | null;
+  identifying: boolean;
+  typeConfirmed: boolean;
+  cardinality: Cardinality;
+  cardinalityConfirmed: boolean;
+  required: boolean;
+  requiredConfirmed: boolean;
+}
+
+const INITIAL_RELATIONSHIP_DRAFT: RelationshipDraft = {
+  active: false,
+  sourceEntityId: null,
+  targetEntityId: null,
+  identifying: false,
+  typeConfirmed: false,
+  cardinality: '1:N',
+  cardinalityConfirmed: false,
+  required: true,
+  requiredConfirmed: false
+};
 
 export function EditorPage() {
   const params = useParams();
@@ -53,6 +78,7 @@ export function EditorPage() {
   const [saving, setSaving] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState('');
   const [localError, setLocalError] = useState('');
+  const [relationshipDraft, setRelationshipDraft] = useState<RelationshipDraft>(INITIAL_RELATIONSHIP_DRAFT);
   const lastAutoSaveSignature = useRef('');
 
   useEffect(() => {
@@ -127,6 +153,39 @@ export function EditorPage() {
     setSqlPreview(generateDdl(workspace.document, dialect));
   }, [dialect, workspace?.document]);
 
+  useEffect(() => {
+    const handleKeydown = (event: KeyboardEvent) => {
+      const modifier = event.metaKey || event.ctrlKey;
+      if (!modifier) return;
+      const target = event.target as HTMLElement | null;
+      const isTypingTarget =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        target?.isContentEditable;
+      if (isTypingTarget) return;
+
+      const key = event.key.toLowerCase();
+      if (key === 'z' && event.shiftKey) {
+        event.preventDefault();
+        redo();
+        return;
+      }
+      if (key === 'y') {
+        event.preventDefault();
+        redo();
+        return;
+      }
+      if (key === 'z') {
+        event.preventDefault();
+        undo();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeydown);
+    return () => window.removeEventListener('keydown', handleKeydown);
+  }, [redo, undo]);
+
   if (!erdId || !workspace) {
     return (
       <AppCard>
@@ -140,27 +199,123 @@ export function EditorPage() {
   const selectedEntity = document.entities.find((entity) => entity.id === selectedEntityId) ?? document.entities[0] ?? null;
   const selectedRelationship = document.relationships.find((relationship) => relationship.id === selectedRelationshipId) ?? null;
   const selectedNote = document.notes.find((note) => note.id === selectedNoteId) ?? null;
+  const relationshipSource = document.entities.find((entity) => entity.id === relationshipDraft.sourceEntityId) ?? null;
+  const relationshipTarget = document.entities.find((entity) => entity.id === relationshipDraft.targetEntityId) ?? null;
 
   const nodes: Node[] = document.entities.map((entity) => ({
     id: entity.id,
     type: 'entityNode',
     position: entity.position,
-    data: { entity }
+    data: { entity },
+    className: relationshipDraft.sourceEntityId === entity.id ? 'is-relationship-source' : relationshipDraft.targetEntityId === entity.id ? 'is-relationship-target' : ''
   }));
 
   const edges: Edge[] = document.relationships.map((relationship) => ({
     id: relationship.id,
     source: relationship.sourceEntityId,
     target: relationship.targetEntityId,
-    label: relationship.cardinality,
+    label: `${relationship.identifying ? '식별' : '비식별'} · ${relationship.cardinality} · ${relationship.required ? '필수' : '선택'}`,
     animated: relationship.id === selectedRelationshipId,
-    style: { strokeWidth: 2, stroke: relationship.id === selectedRelationshipId ? '#ffb86b' : '#88a0ff' }
+    style: {
+      strokeWidth: relationship.identifying ? 2.8 : 2.1,
+      stroke: relationship.id === selectedRelationshipId ? '#f59e0b' : relationship.identifying ? '#2563eb' : '#94a3b8',
+      strokeDasharray: relationship.identifying ? undefined : '7 5'
+    },
+    labelStyle: {
+      fill: '#334155',
+      fontSize: 12,
+      fontWeight: 700
+    }
   }));
+
+  const canvasHint = (() => {
+    if (!relationshipDraft.active) {
+      return '엔티티를 자유롭게 배치하면서 구조를 잡으세요.';
+    }
+    if (!relationshipDraft.sourceEntityId) {
+      return '1단계: 시작 엔티티를 클릭하세요.';
+    }
+    if (!relationshipDraft.targetEntityId) {
+      return '2단계: 연결할 대상 엔티티를 클릭하세요.';
+    }
+    return '3단계: 우측 패널에서 식별/카디널리티/필수 여부를 정하고 관계를 확정하세요.';
+  })();
+
+  function resetRelationshipDraft() {
+    setRelationshipDraft(INITIAL_RELATIONSHIP_DRAFT);
+    setLocalError('');
+  }
+
+  function handleStartRelationshipMode() {
+    setSelectedEntityId(null);
+    setSelectedRelationshipId(null);
+    setSelectedNoteId(null);
+    setRelationshipDraft((current) => (current.active ? INITIAL_RELATIONSHIP_DRAFT : { ...INITIAL_RELATIONSHIP_DRAFT, active: true }));
+    setLocalError('');
+  }
+
+  function handleNodeSelection(nodeId: string) {
+    if (!relationshipDraft.active) {
+      setSelectedEntityId(nodeId);
+      return;
+    }
+
+    if (!relationshipDraft.sourceEntityId) {
+      setRelationshipDraft((current) => ({ ...current, sourceEntityId: nodeId }));
+      setLocalError('');
+      return;
+    }
+
+    if (relationshipDraft.sourceEntityId === nodeId) {
+      setLocalError('서로 다른 두 엔티티를 선택해야 합니다.');
+      return;
+    }
+
+    if (!relationshipDraft.targetEntityId) {
+      setRelationshipDraft((current) => ({
+        ...current,
+        targetEntityId: nodeId,
+        typeConfirmed: false,
+        cardinalityConfirmed: false,
+        requiredConfirmed: false
+      }));
+      setLocalError('');
+      return;
+    }
+
+    setSelectedEntityId(nodeId);
+  }
+
+  function handleConfirmRelationship() {
+    if (!relationshipDraft.sourceEntityId || !relationshipDraft.targetEntityId) {
+      setLocalError('관계를 확정하려면 두 엔티티를 모두 선택해야 합니다.');
+      return;
+    }
+    if (!relationshipDraft.typeConfirmed || !relationshipDraft.cardinalityConfirmed || !relationshipDraft.requiredConfirmed) {
+      setLocalError('식별 여부, 카디널리티, 필수/선택 단계를 순서대로 완료하세요.');
+      return;
+    }
+
+    const relationshipId = addRelationship({
+      sourceEntityId: relationshipDraft.sourceEntityId,
+      targetEntityId: relationshipDraft.targetEntityId,
+      identifying: relationshipDraft.identifying,
+      cardinality: relationshipDraft.cardinality,
+      required: relationshipDraft.required
+    });
+    if (!relationshipId) {
+      setLocalError('관계를 생성하지 못했습니다. 엔티티가 2개 이상인지 확인하세요.');
+      return;
+    }
+
+    setSelectedRelationshipId(relationshipId);
+    resetRelationshipDraft();
+  }
 
   async function handleExportPng() {
     const container = window.document.querySelector('.react-flow') as HTMLElement | null;
     if (!container) return;
-    const dataUrl = await toPng(container, { cacheBust: true, pixelRatio: 2 });
+    const dataUrl = await toPng(container, { cacheBust: true, pixelRatio: 2, backgroundColor: '#f8fafc' });
     const link = window.document.createElement('a');
     link.href = dataUrl;
     link.download = `${document.title || 'erd'}.png`;
@@ -177,188 +332,303 @@ export function EditorPage() {
   }
 
   return (
-    <div className="editor-layout">
-      <aside className="editor-sidebar">
-        <AppCard className="sidebar-card">
-          <div className="section-head compact">
-            <div>
-              <StatusPill tone={collaboration.isConnected ? 'success' : 'warning'}>
-                {collaboratorStatus}
-              </StatusPill>
-              <h3>{document.title}</h3>
-            </div>
+    <div className="editor-workbench reveal">
+      <section className="editor-workbench-topbar">
+        <div className="editor-title-group">
+          <div>
+            <h2>{document.title}</h2>
+            <p>{erds.find((item) => item.id === erdId)?.teamName ?? '개인 워크스페이스'} · {formatDate(document.updatedAt)}</p>
           </div>
-          <div className="stack">
-            <div>
-              <AppLabel>ERD 제목</AppLabel>
-              <AppInput value={document.title} onChange={(event) => setDocumentTitle(event.target.value)} />
-            </div>
-            <div>
-              <AppLabel>설명</AppLabel>
-              <AppTextarea value={document.description} onChange={(event) => setDocumentDescription(event.target.value)} />
-            </div>
-            <div className="status-grid compact">
-              <div>
-                <span>저장</span>
-                <strong>{saving ? '저장 중' : lastSavedAt ? formatDate(lastSavedAt) : '대기 중'}</strong>
-              </div>
-              <div>
-                <span>연결</span>
-                <strong>{collaboratorPeers}명</strong>
-              </div>
-            </div>
-          </div>
-        </AppCard>
-
-        <AppCard className="sidebar-card">
-          <div className="section-head compact">
-            <div>
-              <h3>구성 요소</h3>
-              <p>엔티티, 관계, 메모를 편집합니다.</p>
-            </div>
-          </div>
-          <div className="stack">
-            <AppButton onClick={addEntity}>엔티티 추가</AppButton>
-            <AppButton variant="secondary" onClick={() => addRelationship(selectedEntity?.id)}>
-              관계 추가
-            </AppButton>
-            <AppButton variant="secondary" onClick={addNote}>
-              메모 추가
-            </AppButton>
-            <div className="inline-actions">
-              <AppButton variant="ghost" onClick={undo}>
-                실행취소
-              </AppButton>
-              <AppButton variant="ghost" onClick={redo}>
-                복구
-              </AppButton>
-            </div>
-          </div>
-        </AppCard>
-
-        <AppCard className="sidebar-card">
-          <div className="section-head compact">
-            <div>
-              <h3>엔티티 목록</h3>
-            </div>
-          </div>
-          <div className="list">
-            {document.entities.map((entity) => (
-              <button key={entity.id} className={`list-item ${selectedEntityId === entity.id ? 'active' : ''}`} onClick={() => setSelectedEntityId(entity.id)}>
-                <div>
-                  <strong>{entity.name}</strong>
-                  <span>{entity.fields.length} fields</span>
-                </div>
-                <small>{entity.memo || '메모 없음'}</small>
-              </button>
-            ))}
-          </div>
-        </AppCard>
-
-        <AppCard className="sidebar-card">
-          <div className="section-head compact">
-            <div>
-              <h3>메모 목록</h3>
-            </div>
-          </div>
-          <div className="list">
-            {document.notes.map((note) => (
-              <button key={note.id} className={`list-item ${selectedNoteId === note.id ? 'active' : ''}`} onClick={() => setSelectedNoteId(note.id)}>
-                <div>
-                  <strong>메모</strong>
-                  <span>{note.content.slice(0, 36) || '내용 없음'}</span>
-                </div>
-              </button>
-            ))}
-          </div>
-        </AppCard>
-      </aside>
-
-      <section className="editor-main">
-        <div className="editor-toolbar">
-          <div className="toolbar-left">
-            <StatusPill tone="info">{erds.find((item) => item.id === erdId)?.title ?? document.title}</StatusPill>
-            <small>{formatDate(document.updatedAt)}</small>
-          </div>
-          <div className="toolbar-actions">
-            <select className="app-input" value={dialect} onChange={(event) => setDialect(event.target.value as Dialect)}>
-              <option value="mysql">MySQL</option>
-              <option value="mariadb">MariaDB</option>
-              <option value="oracle">Oracle</option>
-              <option value="postgresql">PostgreSQL</option>
-            </select>
-            <AppButton variant="secondary" onClick={handlePreviewSql}>
-              SQL 미리보기
-            </AppButton>
-            <AppButton variant="secondary" onClick={handleExportSql}>
-              SQL 다운로드
-            </AppButton>
-            <AppButton variant="secondary" onClick={handleExportPng}>
-              PNG 다운로드
-            </AppButton>
+          <div className="editor-status-row">
+            <StatusPill tone={collaboration.isConnected ? 'success' : 'warning'}>{collaboratorStatus}</StatusPill>
+            <StatusPill tone="info">{collaboratorPeers}명 접속</StatusPill>
+            <StatusPill tone={saving ? 'warning' : 'neutral'}>{saving ? '저장 중' : lastSavedAt ? `저장 ${formatDate(lastSavedAt)}` : '자동 저장'}</StatusPill>
           </div>
         </div>
 
-        <div className="editor-canvas">
-          <ReactFlowProvider>
-            <ReactFlow
-              nodes={nodes}
-              edges={edges}
-              nodeTypes={nodeTypes}
-              fitView
-              onNodesChange={(changes) => {
-                changes.forEach((change) => {
-                  if (change.type === 'position' && change.position && change.id) {
-                    useAppStore.getState().moveEntity(change.id, change.position);
-                  }
-                  if (change.type === 'remove' && change.id) {
-                    removeEntity(change.id);
-                  }
-                });
-              }}
-              onEdgesChange={(changes) => {
-                changes.forEach((change) => {
-                  if (change.type === 'remove' && change.id) {
-                    removeRelationship(change.id);
-                  }
-                });
-              }}
-              onConnect={(connection) => {
-                if (!connection.source || !connection.target) return;
-                addRelationship(connection.source, connection.target);
-              }}
-              onNodeClick={(_, node) => setSelectedEntityId(node.id)}
-              onEdgeClick={(_, edge) => setSelectedRelationshipId(edge.id)}
-              onPaneClick={() => {
-                setSelectedEntityId(null);
-                setSelectedRelationshipId(null);
-                setSelectedNoteId(null);
-              }}
-            >
-              <Background gap={20} size={1} />
-              <Controls />
-              <MiniMap zoomable pannable />
-            </ReactFlow>
-          </ReactFlowProvider>
+        <div className="editor-quick-actions">
+          <AppButton variant="ghost" onClick={undo}>
+            <Undo2 size={16} /> 실행취소
+          </AppButton>
+          <AppButton variant="ghost" onClick={redo}>
+            <Redo2 size={16} /> 복구
+          </AppButton>
+          <AppButton variant="secondary" onClick={handleStartRelationshipMode}>
+            <Link2 size={16} /> {relationshipDraft.active ? '관계 모드 종료' : '관계 설정 모드'}
+          </AppButton>
+          <AppButton variant="secondary" onClick={handleExportPng}>PNG</AppButton>
+          <AppButton variant="secondary" onClick={handleExportSql}>SQL</AppButton>
         </div>
+      </section>
 
-        <div className="editor-bottom">
-          <AppCard className="detail-card">
+      <div className="editor-workbench-body">
+        <aside className="editor-panel editor-panel-left">
+          <AppCard className="sidebar-card soft-card">
             <div className="section-head compact">
               <div>
-                <h3>선택한 엔티티</h3>
+                <h3>캔버스 도구</h3>
+                <p>구조를 빠르게 배치하고 연결하세요.</p>
+              </div>
+            </div>
+            <div className="stack">
+              <AppButton onClick={addEntity}>엔티티 추가</AppButton>
+              <AppButton variant="secondary" onClick={handleStartRelationshipMode}>
+                <MousePointerClick size={16} /> 두 엔티티 클릭으로 관계 생성
+              </AppButton>
+              <AppButton variant="secondary" onClick={addNote}>메모 추가</AppButton>
+              <p className="helper-text">단축키: Ctrl/Cmd + Z 실행취소, Ctrl/Cmd + Shift + Z 또는 Ctrl/Cmd + Y 복구</p>
+            </div>
+          </AppCard>
+
+          <AppCard className="sidebar-card soft-card">
+            <div className="section-head compact">
+              <div>
+                <h3>구조 목록</h3>
+                <p>선택 후 우측에서 상세 수정</p>
+              </div>
+            </div>
+            <div className="entity-list">
+              {document.entities.map((entity) => (
+                <button
+                  key={entity.id}
+                  className={`entity-list-item ${
+                    selectedEntityId === entity.id ||
+                    relationshipDraft.sourceEntityId === entity.id ||
+                    relationshipDraft.targetEntityId === entity.id
+                      ? 'active'
+                      : ''
+                  }`}
+                  onClick={() => handleNodeSelection(entity.id)}
+                >
+                  <strong>{entity.name}</strong>
+                  <span>{entity.fields.length} fields</span>
+                </button>
+              ))}
+            </div>
+            <div className="note-list">
+              {document.notes.map((note) => (
+                <button
+                  key={note.id}
+                  className={`note-list-item ${selectedNoteId === note.id ? 'active' : ''}`}
+                  onClick={() => setSelectedNoteId(note.id)}
+                >
+                  {note.content.slice(0, 48) || '새 메모'}
+                </button>
+              ))}
+            </div>
+          </AppCard>
+        </aside>
+
+        <section className="editor-canvas-shell">
+          <div className={`editor-canvas-toolbar ${relationshipDraft.active ? 'is-relationship-active' : ''}`}>
+            <div>
+              <strong>Canvas</strong>
+              <p>{canvasHint}</p>
+            </div>
+            {relationshipDraft.active && (
+              <div className="relationship-progress">
+                <span className={relationshipDraft.sourceEntityId ? 'done' : ''}>시작 엔티티</span>
+                <span className={relationshipDraft.targetEntityId ? 'done' : ''}>대상 엔티티</span>
+                <span className={relationshipDraft.typeConfirmed ? 'done' : ''}>식별/비식별</span>
+                <span className={relationshipDraft.cardinalityConfirmed ? 'done' : ''}>카디널리티</span>
+                <span className={relationshipDraft.requiredConfirmed ? 'done' : ''}>필수/선택</span>
+              </div>
+            )}
+          </div>
+
+          <div className="editor-canvas light-canvas">
+            <ReactFlowProvider>
+              <ReactFlow
+                nodes={nodes}
+                edges={edges}
+                nodeTypes={nodeTypes}
+                fitView
+                onNodesChange={(changes) => {
+                  changes.forEach((change) => {
+                    if (change.type === 'position' && change.position && change.id) {
+                      useAppStore.getState().moveEntity(change.id, change.position);
+                    }
+                    if (change.type === 'remove' && change.id) {
+                      removeEntity(change.id);
+                    }
+                  });
+                }}
+                onEdgesChange={(changes) => {
+                  changes.forEach((change) => {
+                    if (change.type === 'remove' && change.id) {
+                      removeRelationship(change.id);
+                    }
+                  });
+                }}
+                onNodeClick={(_, node) => handleNodeSelection(node.id)}
+                onEdgeClick={(_, edge) => setSelectedRelationshipId(edge.id)}
+                onPaneClick={() => {
+                  if (!relationshipDraft.active) {
+                    setSelectedEntityId(null);
+                    setSelectedRelationshipId(null);
+                    setSelectedNoteId(null);
+                  }
+                }}
+              >
+                <Background gap={24} size={1} color="#d7e0ea" />
+                <MiniMap zoomable pannable />
+                <Controls />
+              </ReactFlow>
+            </ReactFlowProvider>
+          </div>
+        </section>
+
+        <aside className="editor-panel editor-panel-right">
+          <AppCard className="sidebar-card inspector-card">
+            <div className="section-head compact">
+              <div>
+                <h3>문서 설정</h3>
+                <p>제목과 문서 설명</p>
+              </div>
+            </div>
+            <div className="stack">
+              <div>
+                <AppLabel>ERD 제목</AppLabel>
+                <AppInput value={document.title} onChange={(event) => setDocumentTitle(event.target.value)} />
+              </div>
+              <div>
+                <AppLabel>설명</AppLabel>
+                <AppTextarea value={document.description} onChange={(event) => setDocumentDescription(event.target.value)} />
+              </div>
+            </div>
+          </AppCard>
+
+          <AppCard className="sidebar-card inspector-card">
+            <div className="section-head compact">
+              <div>
+                <h3>관계 생성기</h3>
+                <p>두 엔티티를 고른 뒤 옵션을 확정</p>
+              </div>
+            </div>
+
+            <div className="relationship-builder">
+              <div className="relationship-builder-row">
+                <span>시작</span>
+                <strong>{relationshipSource?.name ?? '미선택'}</strong>
+              </div>
+              <div className="relationship-builder-row">
+                <span>대상</span>
+                <strong>{relationshipTarget?.name ?? '미선택'}</strong>
+              </div>
+
+              <div className="field-grid">
+                <div>
+                  <AppLabel>1. 관계 유형</AppLabel>
+                  <div className="relationship-choice-grid">
+                    <button
+                      type="button"
+                      className={`relationship-choice ${relationshipDraft.identifying ? 'active' : ''}`}
+                      disabled={!relationshipDraft.targetEntityId}
+                      onClick={() =>
+                        setRelationshipDraft((current) => ({
+                          ...current,
+                          identifying: true,
+                          typeConfirmed: true,
+                          cardinalityConfirmed: false,
+                          requiredConfirmed: false
+                        }))
+                      }
+                    >
+                      식별
+                    </button>
+                    <button
+                      type="button"
+                      className={`relationship-choice ${!relationshipDraft.identifying ? 'active' : ''}`}
+                      disabled={!relationshipDraft.targetEntityId}
+                      onClick={() =>
+                        setRelationshipDraft((current) => ({
+                          ...current,
+                          identifying: false,
+                          typeConfirmed: true,
+                          cardinalityConfirmed: false,
+                          requiredConfirmed: false
+                        }))
+                      }
+                    >
+                      비식별
+                    </button>
+                  </div>
+                </div>
+                <div>
+                  <AppLabel>2. 카디널리티</AppLabel>
+                  <select
+                    className="app-input"
+                    disabled={!relationshipDraft.typeConfirmed}
+                    value={relationshipDraft.cardinality}
+                    onChange={(event) =>
+                      setRelationshipDraft((current) => ({
+                        ...current,
+                        cardinality: event.target.value as Cardinality,
+                        cardinalityConfirmed: true,
+                        requiredConfirmed: false
+                      }))
+                    }
+                  >
+                    <option value="1:1">1:1</option>
+                    <option value="1:N">1:N</option>
+                    <option value="N:1">N:1</option>
+                    <option value="N:M">N:M</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <AppLabel>3. 참여성</AppLabel>
+                <select
+                  className="app-input"
+                  disabled={!relationshipDraft.cardinalityConfirmed}
+                  value={relationshipDraft.required ? 'required' : 'optional'}
+                  onChange={(event) =>
+                    setRelationshipDraft((current) => ({
+                      ...current,
+                      required: event.target.value === 'required',
+                      requiredConfirmed: true
+                    }))
+                  }
+                >
+                  <option value="required">필수</option>
+                  <option value="optional">선택</option>
+                </select>
+              </div>
+
+              <p className="helper-text">
+                순서: 관계 설정 모드 시작 {'->'} 시작 엔티티 클릭 {'->'} 대상 엔티티 클릭 {'->'} 식별/비식별 {'->'} 카디널리티 {'->'} 필수/선택
+              </p>
+
+              {localError && <p className="error-text">{localError}</p>}
+
+              <div className="inline-actions">
+                <AppButton
+                  onClick={handleConfirmRelationship}
+                  disabled={!relationshipDraft.requiredConfirmed}
+                >
+                  관계 확정
+                </AppButton>
+                <AppButton variant="ghost" onClick={resetRelationshipDraft}>초기화</AppButton>
+              </div>
+            </div>
+          </AppCard>
+
+          <AppCard className="sidebar-card inspector-card">
+            <div className="section-head compact">
+              <div>
+                <h3>선택 편집기</h3>
+                <p>엔티티, 관계, 메모 상세 수정</p>
               </div>
             </div>
             {selectedEntity ? (
               <div className="stack">
                 <AppInput value={selectedEntity.name} onChange={(event) => updateEntity(selectedEntity.id, { name: event.target.value })} />
                 <AppTextarea value={selectedEntity.memo} onChange={(event) => updateEntity(selectedEntity.id, { memo: event.target.value })} />
-                <AppButton variant="secondary" onClick={() => addField(selectedEntity.id)}>
-                  필드 추가
-                </AppButton>
-                <AppButton variant="ghost" onClick={() => removeEntity(selectedEntity.id)}>
-                  엔티티 삭제
-                </AppButton>
+                <div className="inline-actions">
+                  <AppButton variant="secondary" onClick={() => addField(selectedEntity.id)}>필드 추가</AppButton>
+                  <AppButton variant="ghost" onClick={() => removeEntity(selectedEntity.id)}>엔티티 삭제</AppButton>
+                </div>
                 <div className="field-editor-list">
                   {selectedEntity.fields.map((field) => (
                     <div key={field.id} className="field-editor">
@@ -381,26 +651,25 @@ export function EditorPage() {
                         />
                         PK
                       </label>
-                      <AppButton variant="ghost" onClick={() => removeField(selectedEntity.id, field.id)}>
-                        삭제
-                      </AppButton>
+                      <AppButton variant="ghost" onClick={() => removeField(selectedEntity.id, field.id)}>삭제</AppButton>
                     </div>
                   ))}
                 </div>
               </div>
-            ) : (
-              <p>엔티티를 선택하거나 추가하세요.</p>
-            )}
-          </AppCard>
-
-          <AppCard className="detail-card">
-            <div className="section-head compact">
-              <div>
-                <h3>관계 / 메모</h3>
-              </div>
-            </div>
-            {selectedRelationship ? (
+            ) : selectedRelationship ? (
               <div className="stack">
+                <select
+                  className="app-input"
+                  value={selectedRelationship.identifying ? 'identifying' : 'non-identifying'}
+                  onChange={(event) =>
+                    updateRelationship(selectedRelationship.id, {
+                      identifying: event.target.value === 'identifying'
+                    })
+                  }
+                >
+                  <option value="identifying">식별</option>
+                  <option value="non-identifying">비식별</option>
+                </select>
                 <select
                   className="app-input"
                   value={selectedRelationship.cardinality}
@@ -413,34 +682,52 @@ export function EditorPage() {
                   <option value="N:1">N:1</option>
                   <option value="N:M">N:M</option>
                 </select>
+                <select
+                  className="app-input"
+                  value={selectedRelationship.required ? 'required' : 'optional'}
+                  onChange={(event) =>
+                    updateRelationship(selectedRelationship.id, { required: event.target.value === 'required' })
+                  }
+                >
+                  <option value="required">필수</option>
+                  <option value="optional">선택</option>
+                </select>
                 <AppTextarea value={selectedRelationship.memo} onChange={(event) => updateRelationship(selectedRelationship.id, { memo: event.target.value })} />
-                <AppButton variant="ghost" onClick={() => removeRelationship(selectedRelationship.id)}>
-                  관계 삭제
-                </AppButton>
+                <AppButton variant="ghost" onClick={() => removeRelationship(selectedRelationship.id)}>관계 삭제</AppButton>
               </div>
             ) : selectedNote ? (
               <div className="stack">
                 <AppTextarea value={selectedNote.content} onChange={(event) => updateNote(selectedNote.id, { content: event.target.value })} />
-                <AppButton variant="ghost" onClick={() => removeNote(selectedNote.id)}>
-                  메모 삭제
-                </AppButton>
+                <AppButton variant="ghost" onClick={() => removeNote(selectedNote.id)}>메모 삭제</AppButton>
               </div>
             ) : (
-              <p>관계나 메모를 선택하세요.</p>
+              <p className="helper-text">좌측 목록 또는 캔버스에서 엔티티/관계/메모를 선택하세요.</p>
             )}
-            <p className="helper-text">대시보드에서 문서를 열고, 노드를 드래그하면 위치가 자동 저장됩니다.</p>
           </AppCard>
 
-          <AppCard className="detail-card">
+          <AppCard className="sidebar-card inspector-card">
             <div className="section-head compact">
               <div>
-                <h3>SQL 미리보기</h3>
+                <h3>DDL 미리보기</h3>
+                <p>현재 구조 기준 export</p>
               </div>
             </div>
-            <pre className="sql-preview">{sqlPreview || generateDdl(document, dialect)}</pre>
+            <div className="inline-actions">
+              <select className="app-input" value={dialect} onChange={(event) => setDialect(event.target.value as Dialect)}>
+                <option value="mysql">MySQL</option>
+                <option value="mariadb">MariaDB</option>
+                <option value="oracle">Oracle</option>
+                <option value="postgresql">PostgreSQL</option>
+              </select>
+              <AppButton variant="secondary" onClick={handlePreviewSql}>
+                <Save size={16} /> 새로고침
+              </AppButton>
+            </div>
+            <pre className="sql-preview light-sql-preview">{sqlPreview || generateDdl(document, dialect)}</pre>
+            <p className="helper-text">단축키: Ctrl/Cmd + Z 실행취소, Ctrl/Cmd + Shift + Z 또는 Ctrl + Y 복구</p>
           </AppCard>
-        </div>
-      </section>
+        </aside>
+      </div>
     </div>
   );
 }
