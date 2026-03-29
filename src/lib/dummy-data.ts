@@ -32,6 +32,7 @@ export function createSampleDocument(id = createId('erd')): ErdDocument {
     id,
     title: 'Students and Posts',
     description: '개인 연습용 ERD 샘플입니다.',
+    visibility: 'private',
     entities: [
       {
         id: userId,
@@ -138,6 +139,7 @@ export function createSeedErds(teamId?: string | null): ErdSummary[] {
     {
       id: 'erd_sample',
       title: 'Students and Posts',
+      visibility: 'private',
       teamId: teamId ?? null,
       ownerName: 'Demo User',
       updatedAt: nowIso(),
@@ -145,4 +147,3 @@ export function createSeedErds(teamId?: string | null): ErdSummary[] {
     }
   ];
 }
-

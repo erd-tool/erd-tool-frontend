@@ -2,6 +2,8 @@ export type Dialect = 'mysql' | 'mariadb' | 'oracle' | 'postgresql';
 
 export type Cardinality = '1:1' | '1:N' | 'N:1' | 'N:M';
 
+export type ErdVisibility = 'private' | 'public';
+
 export interface UserSession {
   id: string | number;
   loginId: string;
@@ -24,6 +26,7 @@ export interface ErdSummary {
   id: string;
   title: string;
   description?: string;
+  visibility: ErdVisibility;
   teamId?: string | null;
   teamName?: string | null;
   ownerName: string;
@@ -73,6 +76,7 @@ export interface ErdDocument {
   id: string;
   title: string;
   description: string;
+  visibility: ErdVisibility;
   entities: EntityDefinition[];
   relationships: RelationshipDefinition[];
   notes: NoteDefinition[];

@@ -9,25 +9,28 @@ function ProtectedLayout() {
   const session = useAppStore((state) => state.session);
   const navigate = useNavigate();
   const location = useLocation();
+  const isEditorRoute = location.pathname.startsWith('/app/erd/');
 
   if (!session) {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />;
   }
 
   return (
-    <div className="app-shell">
-      <header className="app-topbar">
-        <div>
-          <strong>ERD Studio</strong>
-          <span>협업 ERD MVP</span>
-        </div>
-        <nav className="topbar-actions">
-          <AppButton variant="ghost" onClick={() => navigate('/app')}>
-            대시보드
-          </AppButton>
-        </nav>
-      </header>
-      <main className="app-content">
+    <div className={`app-shell ${isEditorRoute ? 'editor-shell' : ''}`}>
+      {!isEditorRoute && (
+        <header className="app-topbar">
+          <div>
+            <strong>ERD Studio</strong>
+            <span>협업 ERD MVP</span>
+          </div>
+          <nav className="topbar-actions">
+            <AppButton variant="ghost" onClick={() => navigate('/app')}>
+              대시보드
+            </AppButton>
+          </nav>
+        </header>
+      )}
+      <main className={`app-content ${isEditorRoute ? 'editor-mode' : ''}`}>
         <Outlet />
       </main>
     </div>

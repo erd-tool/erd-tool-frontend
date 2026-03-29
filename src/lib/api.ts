@@ -1,6 +1,6 @@
 import { generateDdl } from './ddl';
 import { nowIso } from './storage';
-import type { Dialect, ErdDocument, ErdSummary, TeamSummary, UserSession } from './types';
+import type { Dialect, ErdDocument, ErdSummary, ErdVisibility, TeamSummary, UserSession } from './types';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080';
 
@@ -65,6 +65,7 @@ function mapErdSummary(payload: {
   id: number;
   title: string;
   description?: string;
+  visibility?: ErdVisibility;
   teamId?: number | null;
   teamName?: string | null;
   updatedAt: string;
@@ -73,6 +74,7 @@ function mapErdSummary(payload: {
     id: String(payload.id),
     title: payload.title,
     description: payload.description ?? '',
+    visibility: payload.visibility ?? 'private',
     teamId: payload.teamId != null ? String(payload.teamId) : null,
     teamName: payload.teamName ?? null,
     ownerName: payload.teamName ?? '개인',
@@ -85,6 +87,7 @@ function mapDocument(payload: {
   id: number;
   title: string;
   description?: string;
+  visibility?: ErdVisibility;
   contentJson: string;
 }) {
   const parsed = JSON.parse(payload.contentJson) as Partial<ErdDocument>;
@@ -92,6 +95,7 @@ function mapDocument(payload: {
     id: String(payload.id),
     title: payload.title,
     description: payload.description ?? '',
+    visibility: payload.visibility ?? parsed.visibility ?? 'private',
     entities: parsed.entities ?? [],
     relationships: parsed.relationships ?? [],
     notes: parsed.notes ?? [],
@@ -159,6 +163,7 @@ export async function fetchErds(token?: string) {
     id: number;
     title: string;
     description?: string;
+    visibility?: ErdVisibility;
     teamId?: number | null;
     teamName?: string | null;
     updatedAt: string;
@@ -174,6 +179,7 @@ export async function fetchErd(token: string | undefined, id: string) {
     id: number;
     title: string;
     description?: string;
+    visibility?: ErdVisibility;
     contentJson: string;
   }>(`/api/erds/${id}`, {
     headers: resolvedToken ? { Authorization: `Bearer ${resolvedToken}` } : {}
@@ -187,6 +193,7 @@ export async function saveErd(token: string | undefined, document: ErdDocument) 
     id: number;
     title: string;
     description?: string;
+    visibility?: ErdVisibility;
     contentJson: string;
   }>(`/api/erds/${document.id}`, {
     method: 'PATCH',
@@ -194,7 +201,9 @@ export async function saveErd(token: string | undefined, document: ErdDocument) 
     body: JSON.stringify({
       title: document.title,
       description: document.description,
+      visibility: document.visibility,
       contentJson: JSON.stringify({
+        visibility: document.visibility,
         entities: document.entities,
         relationships: document.relationships,
         notes: document.notes,
@@ -213,13 +222,14 @@ export async function createErd(token: string | undefined, title: string, teamId
     id: number;
     title: string;
     description?: string;
+    visibility?: ErdVisibility;
     teamId?: number | null;
     teamName?: string | null;
     updatedAt: string;
   }>('/api/erds', {
     method: 'POST',
     headers: resolvedToken ? { Authorization: `Bearer ${resolvedToken}` } : {},
-    body: JSON.stringify({ title, teamId: teamId ? Number(teamId) : null })
+    body: JSON.stringify({ title, visibility: 'private', teamId: teamId ? Number(teamId) : null })
   });
   return response ? mapErdSummary(response) : null;
 }

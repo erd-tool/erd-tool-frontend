@@ -15,6 +15,7 @@ export function useYjsCollaboration(
 ) {
   const [status, setStatus] = useState<CollaborationStatus>('idle');
   const [peers, setPeers] = useState(1);
+  const [peerNames, setPeerNames] = useState<string[]>([]);
   const onRemoteChangeRef = useRef(onRemoteChange);
   const providerRef = useRef<{
     doc: Y.Doc;
@@ -48,7 +49,14 @@ export function useYjsCollaboration(
     };
 
     const handleAwareness = () => {
+      const nextNames = Array.from(provider.awareness.getStates().values())
+        .map((state) => {
+          const user = (state as { user?: { name?: string } }).user;
+          return user?.name?.trim() || '이름 없음';
+        })
+        .filter((name, index, array) => array.indexOf(name) === index);
       setPeers(Math.max(1, provider.awareness.getStates().size));
+      setPeerNames(nextNames.length ? nextNames : [session.displayName]);
     };
 
     const handleSnapshot = () => {
@@ -90,6 +98,7 @@ export function useYjsCollaboration(
   return {
     status,
     peers,
+    peerNames,
     isConnected: status === 'connected'
   };
 }

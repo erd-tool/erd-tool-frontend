@@ -42,6 +42,7 @@ interface AppState {
   replaceDocument: (document: ErdDocument, options?: { pushHistory?: boolean }) => void;
   setDocumentTitle: (title: string) => void;
   setDocumentDescription: (description: string) => void;
+  setDocumentVisibility: (visibility: ErdDocument['visibility']) => void;
   setSelectedEntityId: (id: string | null) => void;
   setSelectedRelationshipId: (id: string | null) => void;
   setSelectedNoteId: (id: string | null) => void;
@@ -67,6 +68,7 @@ interface AppState {
   undo: () => void;
   redo: () => void;
   moveEntity: (entityId: string, position: { x: number; y: number }) => void;
+  moveNote: (noteId: string, position: { x: number; y: number }) => void;
   setCollaborationState: (status: string, peers: number) => void;
 }
 
@@ -173,6 +175,7 @@ export const useAppStore = create<AppState>()(
         const erd: ErdSummary = {
           id: createId('erd'),
           title,
+          visibility: 'private',
           teamId: teamId ?? null,
           ownerName: get().session?.displayName ?? 'Demo User',
           updatedAt: nowIso(),
@@ -245,6 +248,21 @@ export const useAppStore = create<AppState>()(
         if (!active?.workspace) return;
         const next = structuredClone(active.workspace.document);
         next.description = description;
+        next.updatedAt = nowIso();
+        next.version += 1;
+        set((state) => ({
+          documents: {
+            ...state.documents,
+            [active.id]: pushHistory(active.workspace)
+          }
+        }));
+        get().replaceDocument(next, { pushHistory: false });
+      },
+      setDocumentVisibility: (visibility) => {
+        const active = findActiveWorkspace(get());
+        if (!active?.workspace) return;
+        const next = structuredClone(active.workspace.document);
+        next.visibility = visibility;
         next.updatedAt = nowIso();
         next.version += 1;
         set((state) => ({
@@ -350,18 +368,40 @@ export const useAppStore = create<AppState>()(
 
         const next = structuredClone(active.workspace.document);
         const relationId = createId('rel');
+        const sourceEntity = next.entities.find((item) => item.id === source.id);
         const targetEntity = next.entities.find((item) => item.id === target.id);
-        const targetField = targetEntity?.fields.find((field) => field.id === target.fields[0]?.id);
-        if (targetField && !targetField.primaryKey) {
+        const sourceField =
+          sourceEntity?.fields.find((field) => field.primaryKey) ??
+          sourceEntity?.fields[0];
+        const suggestedForeignKeyName = `${source.name.endsWith('s') ? source.name.slice(0, -1) : source.name}_id`;
+        let targetField =
+          targetEntity?.fields.find((field) => field.foreignKey === `${source.name}.${sourceField?.name ?? 'id'}`) ??
+          targetEntity?.fields.find((field) => !field.primaryKey && field.name === suggestedForeignKeyName) ??
+          targetEntity?.fields.find((field) => !field.primaryKey);
+
+        if (!targetField && targetEntity) {
+          targetField = {
+            id: createId('field'),
+            name: suggestedForeignKeyName,
+            type: sourceField?.type ?? 'bigint',
+            length: sourceField?.length,
+            nullable: !(config?.required ?? true),
+            primaryKey: false,
+            foreignKey: `${source.name}.${sourceField?.name ?? 'id'}`
+          };
+          targetEntity.fields.splice(1, 0, targetField);
+        }
+
+        if (targetField) {
           targetField.nullable = !(config?.required ?? true);
-          targetField.foreignKey = `${source.name}.${source.fields[0]?.name ?? 'id'}`;
+          targetField.foreignKey = `${source.name}.${sourceField?.name ?? 'id'}`;
         }
         next.relationships.push({
           id: relationId,
           sourceEntityId: source.id,
           targetEntityId: target.id,
-          sourceFieldId: source.fields[0]?.id,
-          targetFieldId: target.fields[0]?.id,
+          sourceFieldId: sourceField?.id,
+          targetFieldId: targetField?.id,
           cardinality: config?.cardinality ?? '1:N',
           identifying: config?.identifying ?? false,
           required: config?.required ?? true,
@@ -480,6 +520,17 @@ export const useAppStore = create<AppState>()(
         const entity = next.entities.find((item) => item.id === entityId);
         if (!entity) return;
         entity.position = position;
+        next.updatedAt = nowIso();
+        next.version += 1;
+        get().replaceDocument(next, { pushHistory: false });
+      },
+      moveNote: (noteId, position) => {
+        const active = findActiveWorkspace(get());
+        if (!active?.workspace) return;
+        const next = structuredClone(active.workspace.document);
+        const note = next.notes.find((item) => item.id === noteId);
+        if (!note) return;
+        note.position = position;
         next.updatedAt = nowIso();
         next.version += 1;
         get().replaceDocument(next, { pushHistory: false });
