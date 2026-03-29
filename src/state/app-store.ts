@@ -373,28 +373,44 @@ export const useAppStore = create<AppState>()(
         const sourceField =
           sourceEntity?.fields.find((field) => field.primaryKey) ??
           sourceEntity?.fields[0];
-        const suggestedForeignKeyName = `${source.name.endsWith('s') ? source.name.slice(0, -1) : source.name}_id`;
+        const sourceFieldName = sourceField?.name ?? 'id';
+        const fallbackForeignKeyName = `${source.name.endsWith('s') ? source.name.slice(0, -1) : source.name}_${sourceFieldName}`;
         let targetField =
-          targetEntity?.fields.find((field) => field.foreignKey === `${source.name}.${sourceField?.name ?? 'id'}`) ??
-          targetEntity?.fields.find((field) => !field.primaryKey && field.name === suggestedForeignKeyName) ??
+          targetEntity?.fields.find((field) => field.foreignKey === `${source.name}.${sourceFieldName}`) ??
+          targetEntity?.fields.find((field) => !field.primaryKey && field.name === sourceFieldName) ??
+          targetEntity?.fields.find((field) => !field.primaryKey && field.name === fallbackForeignKeyName) ??
           targetEntity?.fields.find((field) => !field.primaryKey);
 
-        if (!targetField && targetEntity) {
+        const shouldCreateField =
+          !targetField ||
+          (targetField.primaryKey && targetField.name === sourceFieldName);
+
+        if (shouldCreateField && targetEntity) {
+          const nextFieldName = targetEntity.fields.some((field) => field.name === sourceFieldName && !field.primaryKey)
+            ? fallbackForeignKeyName
+            : sourceFieldName;
           targetField = {
             id: createId('field'),
-            name: suggestedForeignKeyName,
+            name: nextFieldName,
             type: sourceField?.type ?? 'bigint',
             length: sourceField?.length,
             nullable: !(config?.required ?? true),
             primaryKey: false,
-            foreignKey: `${source.name}.${sourceField?.name ?? 'id'}`
+            foreignKey: `${source.name}.${sourceFieldName}`
           };
           targetEntity.fields.splice(1, 0, targetField);
         }
 
         if (targetField) {
+          const hasPrimaryKeyNameCollision =
+            targetEntity?.fields.some((field) => field.primaryKey && field.name === sourceFieldName && field.id !== targetField?.id) ?? false;
+          if (!targetField.primaryKey) {
+            targetField.name = hasPrimaryKeyNameCollision ? fallbackForeignKeyName : sourceFieldName;
+          }
+          targetField.type = sourceField?.type ?? targetField.type;
+          targetField.length = sourceField?.length;
           targetField.nullable = !(config?.required ?? true);
-          targetField.foreignKey = `${source.name}.${sourceField?.name ?? 'id'}`;
+          targetField.foreignKey = `${source.name}.${sourceFieldName}`;
         }
         next.relationships.push({
           id: relationId,

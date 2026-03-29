@@ -113,9 +113,21 @@ function CanvasSelectionCard({
             <div className="field-editor-list compact">
               {selectedEntity.fields.map((field) => (
                 <div key={field.id} className="field-editor compact">
-                  <AppInput value={field.name} onChange={(event) => updateField(selectedEntity.id, field.id, { name: event.target.value })} />
-                  <AppInput value={field.type} onChange={(event) => updateField(selectedEntity.id, field.id, { type: event.target.value })} />
-                  <AppInput value={field.length ?? ''} onChange={(event) => updateField(selectedEntity.id, field.id, { length: event.target.value })} />
+                  <AppInput
+                    className="field-editor-name"
+                    value={field.name}
+                    onChange={(event) => updateField(selectedEntity.id, field.id, { name: event.target.value })}
+                  />
+                  <AppInput
+                    className="field-editor-type"
+                    value={field.type}
+                    onChange={(event) => updateField(selectedEntity.id, field.id, { type: event.target.value })}
+                  />
+                  <AppInput
+                    className="field-editor-length"
+                    value={field.length ?? ''}
+                    onChange={(event) => updateField(selectedEntity.id, field.id, { length: event.target.value })}
+                  />
                   <label className="checkbox-line">
                     <input
                       type="checkbox"
@@ -690,57 +702,97 @@ export function EditorPage() {
                     <span>자식 {document.entities.find((entity) => entity.id === relationshipDraft.targetEntityId)?.name ?? '-'}</span>
                   </div>
                   <div className="stack">
-                    <div className="field-grid compact-grid">
+                    <div className="relationship-option-section">
                       <div>
                         <AppLabel>식별 여부</AppLabel>
-                        <select
-                          className="app-input"
-                          value={relationshipDraft.identifying ? 'identifying' : 'non-identifying'}
-                          onChange={(event) =>
-                            setRelationshipDraft((current) => ({
-                              ...current,
-                              identifying: event.target.value === 'identifying'
-                            }))
-                          }
-                        >
-                          <option value="identifying">식별</option>
-                          <option value="non-identifying">비식별</option>
-                        </select>
+                        <div className="relationship-radio-group">
+                          <label className={`relationship-radio ${relationshipDraft.identifying ? 'active' : ''}`}>
+                            <input
+                              type="radio"
+                              name="relationship-identifying"
+                              checked={relationshipDraft.identifying}
+                              onChange={() =>
+                                setRelationshipDraft((current) => ({
+                                  ...current,
+                                  identifying: true
+                                }))
+                              }
+                            />
+                            <span>식별</span>
+                          </label>
+                          <label className={`relationship-radio ${!relationshipDraft.identifying ? 'active' : ''}`}>
+                            <input
+                              type="radio"
+                              name="relationship-identifying"
+                              checked={!relationshipDraft.identifying}
+                              onChange={() =>
+                                setRelationshipDraft((current) => ({
+                                  ...current,
+                                  identifying: false
+                                }))
+                              }
+                            />
+                            <span>비식별</span>
+                          </label>
+                        </div>
                       </div>
                       <div>
                         <AppLabel>카디널리티</AppLabel>
-                        <select
-                          className="app-input"
-                          value={relationshipDraft.cardinality}
-                          onChange={(event) =>
-                            setRelationshipDraft((current) => ({
-                              ...current,
-                              cardinality: event.target.value as Cardinality
-                            }))
-                          }
-                        >
-                          <option value="1:1">1:1</option>
-                          <option value="1:N">1:N</option>
-                          <option value="N:1">N:1</option>
-                          <option value="N:M">N:M</option>
-                        </select>
+                        <div className="relationship-radio-grid">
+                          {(['1:1', '1:N', 'N:1', 'N:M'] as Cardinality[]).map((option) => (
+                            <label
+                              key={option}
+                              className={`relationship-radio ${relationshipDraft.cardinality === option ? 'active' : ''}`}
+                            >
+                              <input
+                                type="radio"
+                                name="relationship-cardinality"
+                                checked={relationshipDraft.cardinality === option}
+                                onChange={() =>
+                                  setRelationshipDraft((current) => ({
+                                    ...current,
+                                    cardinality: option
+                                  }))
+                                }
+                              />
+                              <span>{option}</span>
+                            </label>
+                          ))}
+                        </div>
                       </div>
                     </div>
                     <div>
                       <AppLabel>자식 참여성</AppLabel>
-                      <select
-                        className="app-input"
-                        value={relationshipDraft.required ? 'required' : 'optional'}
-                        onChange={(event) =>
-                          setRelationshipDraft((current) => ({
-                            ...current,
-                            required: event.target.value === 'required'
-                          }))
-                        }
-                      >
-                        <option value="required">필수</option>
-                        <option value="optional">선택</option>
-                      </select>
+                      <div className="relationship-radio-group">
+                        <label className={`relationship-radio ${relationshipDraft.required ? 'active' : ''}`}>
+                          <input
+                            type="radio"
+                            name="relationship-required"
+                            checked={relationshipDraft.required}
+                            onChange={() =>
+                              setRelationshipDraft((current) => ({
+                                ...current,
+                                required: true
+                              }))
+                            }
+                          />
+                          <span>필수</span>
+                        </label>
+                        <label className={`relationship-radio ${!relationshipDraft.required ? 'active' : ''}`}>
+                          <input
+                            type="radio"
+                            name="relationship-required"
+                            checked={!relationshipDraft.required}
+                            onChange={() =>
+                              setRelationshipDraft((current) => ({
+                                ...current,
+                                required: false
+                              }))
+                            }
+                          />
+                          <span>선택</span>
+                        </label>
+                      </div>
                     </div>
                     <div className="modal-actions">
                       <AppButton variant="ghost" onClick={resetRelationshipDraft}>취소</AppButton>
