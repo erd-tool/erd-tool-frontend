@@ -3,6 +3,7 @@ export type Dialect = 'mysql' | 'mariadb' | 'oracle' | 'postgresql';
 export type Cardinality = '1:1' | '1:N' | 'N:1' | 'N:M';
 
 export type ErdVisibility = 'private' | 'public';
+export type EntityViewMode = 'logical' | 'physical' | 'both';
 
 export interface UserSession {
   id: string | number;
@@ -37,6 +38,7 @@ export interface ErdSummary {
 export interface FieldDefinition {
   id: string;
   name: string;
+  logicalName?: string;
   type: string;
   length?: string;
   nullable: boolean;
@@ -49,6 +51,8 @@ export interface FieldDefinition {
 export interface EntityDefinition {
   id: string;
   name: string;
+  logicalName?: string;
+  color?: string;
   memo: string;
   position: { x: number; y: number };
   fields: FieldDefinition[];
@@ -61,6 +65,15 @@ export interface RelationshipDefinition {
   sourceFieldId?: string;
   targetFieldId?: string;
   cardinality: Cardinality;
+  controlOffset?: {
+    x: number;
+    y: number;
+  };
+  curveOffset?: number;
+  controlPoint?: {
+    x: number;
+    y: number;
+  };
   identifying?: boolean;
   required?: boolean;
   memo: string;

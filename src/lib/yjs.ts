@@ -5,7 +5,7 @@ import type { ErdDocument, UserSession } from './types';
 
 type CollaborationStatus = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'error';
 
-const COLLAB_URL = import.meta.env.VITE_COLLAB_URL ?? 'ws://localhost:1234';
+const COLLAB_URL = resolveCollaborationUrl();
 
 export function useYjsCollaboration(
   erdId: string | undefined,
@@ -35,7 +35,12 @@ export function useYjsCollaboration(
     }
 
     const doc = new Y.Doc();
-    const provider = new WebsocketProvider(COLLAB_URL, erdId, doc, { connect: true });
+    const provider = new WebsocketProvider(COLLAB_URL, erdId, doc, {
+      connect: true,
+      params: {
+        access_token: session.token
+      }
+    });
     const snapshot = doc.getMap('snapshot');
     providerRef.current = { doc, provider, snapshot };
     setStatus('connecting');
@@ -101,4 +106,23 @@ export function useYjsCollaboration(
     peerNames,
     isConnected: status === 'connected'
   };
+}
+
+function resolveCollaborationUrl() {
+  const configured = import.meta.env.VITE_COLLAB_URL?.trim();
+  if (configured) {
+    return configured.replace(/\/$/, '');
+  }
+
+  try {
+    const apiBase = import.meta.env.VITE_API_BASE_URL?.trim() || window.location.origin;
+    const url = new URL(apiBase, window.location.origin);
+    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+    url.pathname = '/ws/collaboration';
+    url.search = '';
+    url.hash = '';
+    return url.toString().replace(/\/$/, '');
+  } catch {
+    return 'ws://localhost:8080/ws/collaboration';
+  }
 }

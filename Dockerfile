@@ -1,7 +1,7 @@
 FROM node:22-alpine AS build
 WORKDIR /app
 ARG VITE_API_BASE_URL=http://localhost:8080
-ARG VITE_COLLAB_URL=ws://localhost:1234
+ARG VITE_COLLAB_URL=ws://localhost:8080/ws/collaboration
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 ENV VITE_COLLAB_URL=$VITE_COLLAB_URL
 COPY package.json ./

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ComponentType, type MouseEvent as ReactMouseEvent } from 'react';
+import { useEffect, useRef, useState, type ComponentType, type PointerEvent as ReactPointerEvent } from 'react';
 import {
   Background,
   Controls,
@@ -14,12 +14,12 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import {
+  ArrowLeft,
   Check,
   Download,
   FileCode2,
   Link2,
   Maximize2,
-  MessageSquarePlus,
   PencilLine,
   Plus,
   Redo2,
@@ -28,7 +28,7 @@ import {
   Undo2,
   Users
 } from 'lucide-react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { toPng } from 'html-to-image';
 import { AppButton, AppCard, AppInput, AppLabel, AppTextarea, StatusPill } from '../../components/ui';
 import { fetchErd, saveErd } from '../../lib/api';
@@ -36,7 +36,16 @@ import { generateDdl } from '../../lib/ddl';
 import { downloadText, formatDate, nowIso } from '../../lib/storage';
 import { useYjsCollaboration } from '../../lib/yjs';
 import { useAppStore } from '../../state/app-store';
-import type { Cardinality, Dialect, ErdDocument, ErdVisibility, RelationshipDefinition } from '../../lib/types';
+import type {
+  Cardinality,
+  Dialect,
+  EntityDefinition,
+  EntityViewMode,
+  ErdDocument,
+  ErdVisibility,
+  FieldDefinition,
+  RelationshipDefinition
+} from '../../lib/types';
 import { EntityNode } from './EntityNode';
 import { RelationshipEdge } from './RelationshipEdge';
 
@@ -53,6 +62,11 @@ interface RelationshipDraft {
   popupPosition: { x: number; y: number } | null;
 }
 
+interface OverlayPosition {
+  x: number;
+  y: number;
+}
+
 const INITIAL_RELATIONSHIP_DRAFT: RelationshipDraft = {
   active: false,
   sourceEntityId: null,
@@ -63,23 +77,87 @@ const INITIAL_RELATIONSHIP_DRAFT: RelationshipDraft = {
   popupPosition: null
 };
 
+const ENTITY_VIEW_OPTIONS: Array<{ mode: EntityViewMode; label: string }> = [
+  { mode: 'logical', label: '논리' },
+  { mode: 'physical', label: '물리' },
+  { mode: 'both', label: '논리/물리' }
+];
+
+const ENTITY_COLOR_OPTIONS = [
+  '#f9a8d4',
+  '#fda4af',
+  '#fdba74',
+  '#fcd34d',
+  '#bef264',
+  '#86efac',
+  '#67e8f9',
+  '#93c5fd',
+  '#a5b4fc',
+  '#fca5a5'
+];
+
+function getAutoSaveSignature(document: ErdDocument) {
+  const { updatedAt: _updatedAt, ...rest } = document;
+  return JSON.stringify(rest);
+}
+
+function getEntityLabel(entity: EntityDefinition, viewMode: EntityViewMode) {
+  if (viewMode === 'logical') return entity.logicalName ?? entity.name;
+  if (viewMode === 'both') return `${entity.logicalName ?? entity.name} / ${entity.name}`;
+  return entity.name;
+}
+
+function getFieldLogicalName(field: FieldDefinition) {
+  return field.logicalName ?? field.name;
+}
+
+function getEstimatedEntityHeight(entity: EntityDefinition, viewMode: EntityViewMode) {
+  const headerHeight = viewMode === 'both' ? 86 : 62;
+  const rowHeight = viewMode === 'both' ? 54 : 42;
+  const memoHeight = entity.memo ? 48 : 0;
+  return headerHeight + entity.fields.length * rowHeight + memoHeight + 28;
+}
+
+function getFieldHeaderLabels(viewMode: EntityViewMode) {
+  if (viewMode === 'logical') return ['속성명', '코멘트', 'Nullable', 'PK', '삭제'];
+  if (viewMode === 'physical') return ['컬럼명', '자료형', '길이', '기본값', '코멘트', 'Nullable', 'PK', '삭제'];
+  return ['속성명', '컬럼명', '자료형', '길이', '기본값', '코멘트', 'Nullable', 'PK', '삭제'];
+}
+
+function getRelationshipHandles(sourceEntity: EntityDefinition, targetEntity: EntityDefinition) {
+  const deltaX = targetEntity.position.x - sourceEntity.position.x;
+  const deltaY = targetEntity.position.y - sourceEntity.position.y;
+
+  if (Math.abs(deltaX) >= Math.abs(deltaY)) {
+    return deltaX >= 0
+      ? { sourceHandle: 'source-right', targetHandle: 'target-left' }
+      : { sourceHandle: 'source-left', targetHandle: 'target-right' };
+  }
+
+  return deltaY >= 0
+    ? { sourceHandle: 'source-bottom', targetHandle: 'target-top' }
+    : { sourceHandle: 'source-top', targetHandle: 'target-bottom' };
+}
+
 function CanvasSelectionCard({
   selectedEntity,
   selectedRelationship,
-  selectedNote,
+  viewMode,
+  position,
+  onDragStart,
   updateEntity,
   removeEntity,
   addField,
   updateField,
   removeField,
   updateRelationship,
-  removeRelationship,
-  updateNote,
-  removeNote
+  removeRelationship
 }: {
   selectedEntity: ErdDocument['entities'][number] | null;
   selectedRelationship: RelationshipDefinition | null;
-  selectedNote: ErdDocument['notes'][number] | null;
+  viewMode: EntityViewMode;
+  position: OverlayPosition;
+  onDragStart: (target: 'inspector' | 'relationship') => (event: ReactPointerEvent<HTMLElement>) => void;
   updateEntity: ReturnType<typeof useAppStore.getState>['updateEntity'];
   removeEntity: ReturnType<typeof useAppStore.getState>['removeEntity'];
   addField: ReturnType<typeof useAppStore.getState>['addField'];
@@ -87,46 +165,111 @@ function CanvasSelectionCard({
   removeField: ReturnType<typeof useAppStore.getState>['removeField'];
   updateRelationship: ReturnType<typeof useAppStore.getState>['updateRelationship'];
   removeRelationship: ReturnType<typeof useAppStore.getState>['removeRelationship'];
-  updateNote: ReturnType<typeof useAppStore.getState>['updateNote'];
-  removeNote: ReturnType<typeof useAppStore.getState>['removeNote'];
 }) {
-  if (!selectedEntity && !selectedRelationship && !selectedNote) return null;
+  if (!selectedEntity && !selectedRelationship) return null;
 
   return (
-    <div className="canvas-inspector">
+    <div className="canvas-inspector" style={{ left: position.x, top: position.y, right: 'auto' }}>
       {selectedEntity ? (
         <AppCard className="canvas-overlay-card">
-          <div className="canvas-overlay-head">
+          <div className="canvas-overlay-head draggable-overlay-handle" onPointerDown={onDragStart('inspector')}>
             <div>
               <strong>엔티티 편집</strong>
-              <p>{selectedEntity.name}</p>
+              <p>{getEntityLabel(selectedEntity, viewMode)}</p>
             </div>
-            <StatusPill tone="info">{selectedEntity.fields.length} fields</StatusPill>
+            <div className="entity-editor-head-tools">
+              <div className="entity-color-picker" onPointerDown={(event) => event.stopPropagation()}>
+                {ENTITY_COLOR_OPTIONS.map((color) => (
+                  <button
+                    key={color}
+                    type="button"
+                    className={`entity-color-swatch ${selectedEntity.color === color ? 'active' : ''}`}
+                    style={{ backgroundColor: color }}
+                    onClick={() => updateEntity(selectedEntity.id, { color })}
+                    aria-label={`엔티티 색상 ${color}`}
+                  />
+                ))}
+              </div>
+              <StatusPill tone="info">{selectedEntity.fields.length} fields</StatusPill>
+            </div>
           </div>
           <div className="stack">
-            <AppInput value={selectedEntity.name} onChange={(event) => updateEntity(selectedEntity.id, { name: event.target.value })} />
-            <AppTextarea value={selectedEntity.memo} onChange={(event) => updateEntity(selectedEntity.id, { memo: event.target.value })} />
+            {(viewMode === 'logical' || viewMode === 'both') ? (
+              <div>
+                <AppLabel>엔티티 논리명</AppLabel>
+                <AppInput
+                  value={selectedEntity.logicalName ?? ''}
+                  onChange={(event) => updateEntity(selectedEntity.id, { logicalName: event.target.value })}
+                />
+              </div>
+            ) : null}
+            {(viewMode === 'physical' || viewMode === 'both') ? (
+              <div>
+                <AppLabel>엔티티 물리명</AppLabel>
+                <AppInput value={selectedEntity.name} onChange={(event) => updateEntity(selectedEntity.id, { name: event.target.value })} />
+              </div>
+            ) : null}
+            <div>
+              <AppLabel>엔티티 코멘트</AppLabel>
+              <AppTextarea rows={2} value={selectedEntity.memo} onChange={(event) => updateEntity(selectedEntity.id, { memo: event.target.value })} />
+            </div>
             <div className="inline-actions">
               <AppButton variant="secondary" onClick={() => addField(selectedEntity.id)}>필드 추가</AppButton>
               <AppButton variant="ghost" onClick={() => removeEntity(selectedEntity.id)}>엔티티 삭제</AppButton>
             </div>
-            <div className="field-editor-list compact">
+            <div className={`field-editor-list compact mode-${viewMode}`}>
+              <div className={`field-editor-head mode-${viewMode}`}>
+                {getFieldHeaderLabels(viewMode).map((label) => (
+                  <span key={label}>{label}</span>
+                ))}
+              </div>
               {selectedEntity.fields.map((field) => (
-                <div key={field.id} className="field-editor compact">
+                <div key={field.id} className={`field-editor compact mode-${viewMode}`}>
+                  {(viewMode === 'logical' || viewMode === 'both') ? (
+                    <AppInput
+                      className="field-editor-logical"
+                      placeholder="속성명"
+                      value={getFieldLogicalName(field)}
+                      onChange={(event) => updateField(selectedEntity.id, field.id, { logicalName: event.target.value })}
+                    />
+                  ) : null}
+                  {(viewMode === 'physical' || viewMode === 'both') ? (
+                    <AppInput
+                      className="field-editor-name"
+                      placeholder="컬럼명"
+                      value={field.name}
+                      onChange={(event) => updateField(selectedEntity.id, field.id, { name: event.target.value })}
+                    />
+                  ) : null}
+                  {(viewMode === 'physical' || viewMode === 'both') ? (
+                    <AppInput
+                      className="field-editor-type"
+                      placeholder="자료형"
+                      value={field.type}
+                      onChange={(event) => updateField(selectedEntity.id, field.id, { type: event.target.value })}
+                    />
+                  ) : null}
+                  {(viewMode === 'physical' || viewMode === 'both') ? (
+                    <AppInput
+                      className="field-editor-length"
+                      placeholder="길이"
+                      value={field.length ?? ''}
+                      onChange={(event) => updateField(selectedEntity.id, field.id, { length: event.target.value })}
+                    />
+                  ) : null}
+                  {(viewMode === 'physical' || viewMode === 'both') ? (
+                    <AppInput
+                      className="field-editor-default"
+                      placeholder="기본값"
+                      value={field.defaultValue ?? ''}
+                      onChange={(event) => updateField(selectedEntity.id, field.id, { defaultValue: event.target.value })}
+                    />
+                  ) : null}
                   <AppInput
-                    className="field-editor-name"
-                    value={field.name}
-                    onChange={(event) => updateField(selectedEntity.id, field.id, { name: event.target.value })}
-                  />
-                  <AppInput
-                    className="field-editor-type"
-                    value={field.type}
-                    onChange={(event) => updateField(selectedEntity.id, field.id, { type: event.target.value })}
-                  />
-                  <AppInput
-                    className="field-editor-length"
-                    value={field.length ?? ''}
-                    onChange={(event) => updateField(selectedEntity.id, field.id, { length: event.target.value })}
+                    className="field-editor-comment"
+                    placeholder="코멘트"
+                    value={field.memo ?? ''}
+                    onChange={(event) => updateField(selectedEntity.id, field.id, { memo: event.target.value })}
                   />
                   <label className="checkbox-line">
                     <input
@@ -154,7 +297,7 @@ function CanvasSelectionCard({
 
       {selectedRelationship ? (
         <AppCard className="canvas-overlay-card">
-          <div className="canvas-overlay-head">
+          <div className="canvas-overlay-head draggable-overlay-handle" onPointerDown={onDragStart('inspector')}>
             <div>
               <strong>관계 편집</strong>
               <p>{selectedRelationship.identifying ? '식별' : '비식별'} 관계</p>
@@ -178,8 +321,6 @@ function CanvasSelectionCard({
             >
               <option value="1:1">1:1</option>
               <option value="1:N">1:N</option>
-              <option value="N:1">N:1</option>
-              <option value="N:M">N:M</option>
             </select>
             <select
               className="app-input"
@@ -189,23 +330,8 @@ function CanvasSelectionCard({
               <option value="required">필수</option>
               <option value="optional">선택</option>
             </select>
-            <AppTextarea value={selectedRelationship.memo} onChange={(event) => updateRelationship(selectedRelationship.id, { memo: event.target.value })} />
+            <AppTextarea rows={2} value={selectedRelationship.memo} onChange={(event) => updateRelationship(selectedRelationship.id, { memo: event.target.value })} />
             <AppButton variant="ghost" onClick={() => removeRelationship(selectedRelationship.id)}>관계 삭제</AppButton>
-          </div>
-        </AppCard>
-      ) : null}
-
-      {selectedNote ? (
-        <AppCard className="canvas-overlay-card">
-          <div className="canvas-overlay-head">
-            <div>
-              <strong>메모 편집</strong>
-              <p>캔버스 메모</p>
-            </div>
-          </div>
-          <div className="stack">
-            <AppTextarea value={selectedNote.content} onChange={(event) => updateNote(selectedNote.id, { content: event.target.value })} />
-            <AppButton variant="ghost" onClick={() => removeNote(selectedNote.id)}>메모 삭제</AppButton>
           </div>
         </AppCard>
       ) : null}
@@ -216,6 +342,7 @@ function CanvasSelectionCard({
 export function EditorPage() {
   const params = useParams();
   const erdId = params.erdId;
+  const navigate = useNavigate();
   const session = useAppStore((state) => state.session);
   const workspace = useAppStore((state) => (erdId ? state.documents[erdId] : undefined));
   const setActiveErd = useAppStore((state) => state.setActiveErd);
@@ -230,9 +357,6 @@ export function EditorPage() {
   const addRelationship = useAppStore((state) => state.addRelationship);
   const updateRelationship = useAppStore((state) => state.updateRelationship);
   const removeRelationship = useAppStore((state) => state.removeRelationship);
-  const addNote = useAppStore((state) => state.addNote);
-  const updateNote = useAppStore((state) => state.updateNote);
-  const removeNote = useAppStore((state) => state.removeNote);
   const undo = useAppStore((state) => state.undo);
   const redo = useAppStore((state) => state.redo);
   const setDocumentTitle = useAppStore((state) => state.setDocumentTitle);
@@ -258,10 +382,19 @@ export function EditorPage() {
   });
   const [sqlModalOpen, setSqlModalOpen] = useState(false);
   const [dialect, setDialect] = useState<Dialect>('mysql');
+  const [entityViewMode, setEntityViewMode] = useState<EntityViewMode>('physical');
   const [localError, setLocalError] = useState('');
   const [relationshipDraft, setRelationshipDraft] = useState<RelationshipDraft>(INITIAL_RELATIONSHIP_DRAFT);
   const [flowInstance, setFlowInstance] = useState<ReactFlowInstance | null>(null);
-  const canvasRef = useRef<HTMLDivElement | null>(null);
+  const [inspectorPosition, setInspectorPosition] = useState<OverlayPosition>({ x: 18, y: 18 });
+  const [relationshipPopupPosition, setRelationshipPopupPosition] = useState<OverlayPosition>({ x: 18, y: 18 });
+  const canvasFrameRef = useRef<HTMLDivElement | null>(null);
+  const suppressRelationshipSelectionUntilRef = useRef(0);
+  const dragStateRef = useRef<{
+    target: 'inspector' | 'relationship' | null;
+    offsetX: number;
+    offsetY: number;
+  }>({ target: null, offsetX: 0, offsetY: 0 });
   const lastAutoSaveSignature = useRef('');
 
   useEffect(() => {
@@ -274,6 +407,8 @@ export function EditorPage() {
     let cancelled = false;
     void fetchErd(session.token, erdId).then((remote) => {
       if (cancelled || !remote) return;
+      lastAutoSaveSignature.current = getAutoSaveSignature(remote);
+      setLastSavedAt(remote.updatedAt);
       putDocument(remote);
     });
     return () => {
@@ -285,19 +420,18 @@ export function EditorPage() {
     if (!workspace?.document || !session || !erdId) return;
     let cancelled = false;
     const timer = window.setTimeout(async () => {
-      setSaving(true);
-      const next = { ...workspace.document, updatedAt: nowIso() } as ErdDocument;
-      const signature = JSON.stringify(next);
+      const signature = getAutoSaveSignature(workspace.document);
       if (signature === lastAutoSaveSignature.current) {
-        setSaving(false);
         return;
       }
+      setSaving(true);
+      const next = { ...workspace.document, updatedAt: nowIso() } as ErdDocument;
       try {
         const remote = await saveErd(session.token, next);
         if (cancelled) return;
         setLastSavedAt(next.updatedAt);
         if (remote) {
-          lastAutoSaveSignature.current = JSON.stringify(remote);
+          lastAutoSaveSignature.current = getAutoSaveSignature(remote);
           replaceDocument(remote, { pushHistory: false });
         } else {
           lastAutoSaveSignature.current = signature;
@@ -341,10 +475,48 @@ export function EditorPage() {
   }, [settingsOpen, titleEditing, workspace?.document]);
 
   useEffect(() => {
+    const handleRelationshipDragFinished = () => {
+      suppressRelationshipSelectionUntilRef.current = window.performance.now() + 250;
+    };
+
+    window.addEventListener('relationship-edge-drag-finished', handleRelationshipDragFinished);
+    return () => window.removeEventListener('relationship-edge-drag-finished', handleRelationshipDragFinished);
+  }, []);
+
+  useEffect(() => {
     const handleKeydown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const key = event.key.toLowerCase();
+
+      if (key === 'escape') {
+        event.preventDefault();
+        if (titleEditing) {
+          setTitleDraft(workspace?.document?.title ?? '');
+          setTitleEditing(false);
+          return;
+        }
+        if (settingsOpen) {
+          setSettingsOpen(false);
+          return;
+        }
+        if (sqlModalOpen) {
+          setSqlModalOpen(false);
+          return;
+        }
+        if (relationshipDraft.active || relationshipDraft.popupPosition) {
+          resetRelationshipDraft();
+          return;
+        }
+        if (selectedEntityId || selectedRelationshipId || selectedNoteId) {
+          setSelectedEntityId(null);
+          setSelectedRelationshipId(null);
+          setSelectedNoteId(null);
+        }
+        return;
+      }
+
       const modifier = event.metaKey || event.ctrlKey;
       if (!modifier) return;
-      const target = event.target as HTMLElement | null;
       const isTypingTarget =
         target instanceof HTMLInputElement ||
         target instanceof HTMLTextAreaElement ||
@@ -352,7 +524,6 @@ export function EditorPage() {
         target?.isContentEditable;
       if (isTypingTarget) return;
 
-      const key = event.key.toLowerCase();
       if (key === 'z' && event.shiftKey) {
         event.preventDefault();
         redo();
@@ -371,7 +542,65 @@ export function EditorPage() {
 
     window.addEventListener('keydown', handleKeydown);
     return () => window.removeEventListener('keydown', handleKeydown);
-  }, [redo, undo]);
+  }, [
+    redo,
+    relationshipDraft.active,
+    relationshipDraft.popupPosition,
+    selectedEntityId,
+    selectedNoteId,
+    selectedRelationshipId,
+    settingsOpen,
+    sqlModalOpen,
+    titleEditing,
+    undo,
+    workspace?.document?.title,
+    setSelectedEntityId,
+    setSelectedNoteId,
+    setSelectedRelationshipId
+  ]);
+
+  function clampOverlayPosition(nextX: number, nextY: number) {
+    const frameRect = canvasFrameRef.current?.getBoundingClientRect();
+    if (!frameRect) return { x: nextX, y: nextY };
+    return {
+      x: Math.max(12, Math.min(nextX, frameRect.width - 160)),
+      y: Math.max(12, Math.min(nextY, frameRect.height - 72))
+    };
+  }
+
+  function handleOverlayDragStart(target: 'inspector' | 'relationship') {
+    return (event: ReactPointerEvent<HTMLElement>) => {
+      const frameRect = canvasFrameRef.current?.getBoundingClientRect();
+      if (!frameRect) return;
+      const currentPosition = target === 'relationship' ? relationshipPopupPosition : inspectorPosition;
+      dragStateRef.current = {
+        target,
+        offsetX: event.clientX - frameRect.left - currentPosition.x,
+        offsetY: event.clientY - frameRect.top - currentPosition.y
+      };
+
+      const handlePointerMove = (moveEvent: PointerEvent) => {
+        const nextPosition = clampOverlayPosition(
+          moveEvent.clientX - frameRect.left - dragStateRef.current.offsetX,
+          moveEvent.clientY - frameRect.top - dragStateRef.current.offsetY
+        );
+        if (dragStateRef.current.target === 'relationship') {
+          setRelationshipPopupPosition(nextPosition);
+        } else {
+          setInspectorPosition(nextPosition);
+        }
+      };
+
+      const handlePointerUp = () => {
+        dragStateRef.current = { target: null, offsetX: 0, offsetY: 0 };
+        window.removeEventListener('pointermove', handlePointerMove);
+        window.removeEventListener('pointerup', handlePointerUp);
+      };
+
+      window.addEventListener('pointermove', handlePointerMove);
+      window.addEventListener('pointerup', handlePointerUp, { once: true });
+    };
+  }
 
   if (!erdId || !workspace) {
     return (
@@ -385,14 +614,21 @@ export function EditorPage() {
   const document = workspace.document;
   const selectedEntity = document.entities.find((entity) => entity.id === selectedEntityId) ?? null;
   const selectedRelationship = document.relationships.find((relationship) => relationship.id === selectedRelationshipId) ?? null;
-  const selectedNote = document.notes.find((note) => note.id === selectedNoteId) ?? null;
   const sqlPreview = generateDdl(document, dialect);
+  const relationshipGroups = new Map<string, string[]>();
+
+  document.relationships.forEach((relationship) => {
+    const pairKey = [relationship.sourceEntityId, relationship.targetEntityId].sort().join('::');
+    const siblings = relationshipGroups.get(pairKey) ?? [];
+    siblings.push(relationship.id);
+    relationshipGroups.set(pairKey, siblings);
+  });
 
   const nodes: Node[] = document.entities.map((entity) => ({
     id: entity.id,
     type: 'entityNode',
     position: entity.position,
-    data: { entity },
+    data: { entity, viewMode: entityViewMode },
     className:
       relationshipDraft.sourceEntityId === entity.id
         ? 'is-relationship-source'
@@ -401,14 +637,30 @@ export function EditorPage() {
           : ''
   }));
 
-  const edges: Edge[] = document.relationships.map((relationship) => ({
-    id: relationship.id,
-    type: 'relationshipEdge',
-    source: relationship.sourceEntityId,
-    target: relationship.targetEntityId,
-    selected: relationship.id === selectedRelationshipId,
-    data: { relationship }
-  }));
+  const edges: Edge[] = document.relationships.map((relationship) => {
+    const sourceEntity = document.entities.find((entity) => entity.id === relationship.sourceEntityId);
+    const targetEntity = document.entities.find((entity) => entity.id === relationship.targetEntityId);
+    const siblingIds = relationshipGroups.get([relationship.sourceEntityId, relationship.targetEntityId].sort().join('::')) ?? [
+      relationship.id
+    ];
+    const laneIndex = siblingIds.indexOf(relationship.id);
+    const laneOffset = (laneIndex - (siblingIds.length - 1) / 2) * 24;
+    const handleSelection =
+      sourceEntity && targetEntity
+        ? getRelationshipHandles(sourceEntity, targetEntity)
+        : { sourceHandle: 'source-bottom', targetHandle: 'target-top' };
+
+    return {
+      id: relationship.id,
+      type: 'relationshipEdge',
+      source: relationship.sourceEntityId,
+      target: relationship.targetEntityId,
+      sourceHandle: handleSelection.sourceHandle,
+      targetHandle: handleSelection.targetHandle,
+      selected: relationship.id === selectedRelationshipId,
+      data: { relationship, laneOffset }
+    };
+  });
 
   function resetRelationshipDraft() {
     setRelationshipDraft(INITIAL_RELATIONSHIP_DRAFT);
@@ -450,16 +702,7 @@ export function EditorPage() {
     setLocalError('');
   }
 
-  function resolvePopupPosition(event?: MouseEvent | ReactMouseEvent) {
-    if (!event || !canvasRef.current) return { x: 240, y: 180 };
-    const rect = canvasRef.current.getBoundingClientRect();
-    return {
-      x: Math.max(32, Math.min(event.clientX - rect.left, rect.width - 320)),
-      y: Math.max(32, Math.min(event.clientY - rect.top, rect.height - 260))
-    };
-  }
-
-  function handleNodeSelection(nodeId: string, event?: MouseEvent | ReactMouseEvent) {
+  function handleNodeSelection(nodeId: string) {
     if (!relationshipDraft.active) {
       setSelectedEntityId(nodeId);
       return;
@@ -480,13 +723,11 @@ export function EditorPage() {
       setRelationshipDraft((current) => ({
         ...current,
         targetEntityId: nodeId,
-        popupPosition: resolvePopupPosition(event)
+        popupPosition: { x: 0, y: 0 }
       }));
       setLocalError('');
       return;
     }
-
-    setSelectedEntityId(nodeId);
   }
 
   function handleConfirmRelationship() {
@@ -506,34 +747,52 @@ export function EditorPage() {
       setLocalError('관계를 생성하지 못했습니다. 엔티티가 2개 이상인지 확인하세요.');
       return;
     }
-    setSelectedRelationshipId(relationshipId);
     resetRelationshipDraft();
   }
 
   async function handleExportPng() {
-    const viewport = window.document.querySelector('.react-flow__viewport') as HTMLElement | null;
-    if (!viewport || !document.entities.length) return;
+    const flowRoot = window.document.querySelector('.editor-canvas-frame .react-flow') as HTMLElement | null;
+    const viewport = flowRoot?.querySelector('.react-flow__viewport') as HTMLElement | null;
+    if (!flowRoot || !viewport || !document.entities.length) return;
     const exportNodes = document.entities.map((entity) => ({
       id: entity.id,
       position: entity.position,
       width: 300,
-      height: entity.memo ? 220 : 180,
+      height: getEstimatedEntityHeight(entity, entityViewMode),
       data: {}
     }));
     const bounds = getNodesBounds(exportNodes);
     const imageWidth = Math.max(1600, Math.round(bounds.width + 320));
     const imageHeight = Math.max(900, Math.round(bounds.height + 320));
     const nextViewport = getViewportForBounds(bounds, imageWidth, imageHeight, 0.2, 1.5, 0.14);
-    const dataUrl = await toPng(viewport, {
+    const previousViewportTransform = viewport.style.transform;
+    const previousRootWidth = flowRoot.style.width;
+    const previousRootHeight = flowRoot.style.height;
+
+    viewport.style.transform = `translate(${nextViewport.x}px, ${nextViewport.y}px) scale(${nextViewport.zoom})`;
+    flowRoot.style.width = `${imageWidth}px`;
+    flowRoot.style.height = `${imageHeight}px`;
+
+    const dataUrl = await toPng(flowRoot, {
       cacheBust: true,
+      pixelRatio: 2,
       backgroundColor: '#f7f9fc',
       width: imageWidth,
       height: imageHeight,
-      style: {
-        width: `${imageWidth}px`,
-        height: `${imageHeight}px`,
-        transform: `translate(${nextViewport.x}px, ${nextViewport.y}px) scale(${nextViewport.zoom})`
+      filter: (node) => {
+        const element = node as Element | null;
+        if (!element?.closest) return true;
+        if (element.closest('.react-flow__minimap')) return false;
+        if (element.closest('.react-flow__controls')) return false;
+        if (element.closest('.canvas-inspector')) return false;
+        if (element.closest('.relationship-popup')) return false;
+        if (element.closest('.canvas-toast')) return false;
+        return true;
       }
+    }).finally(() => {
+      viewport.style.transform = previousViewportTransform;
+      flowRoot.style.width = previousRootWidth;
+      flowRoot.style.height = previousRootHeight;
     });
     const link = window.document.createElement('a');
     link.href = dataUrl;
@@ -587,6 +846,9 @@ export function EditorPage() {
 
         <div className="editor-header-right">
           <div className="editor-header-metrics">
+            <AppButton variant="ghost" className="compact-button" onClick={() => navigate('/app')}>
+              <ArrowLeft size={14} /> 대시보드
+            </AppButton>
             <div className="presence-chip">
               <Users size={14} />
               <span>{collaboration.peers}명 접속</span>
@@ -617,11 +879,20 @@ export function EditorPage() {
         <aside className="editor-left-sidebar">
           <AppCard className="editor-sidebar-card compact">
             <div className="sidebar-action-stack">
+              <div className="sidebar-mode-switch">
+                {ENTITY_VIEW_OPTIONS.map((option) => (
+                  <AppButton
+                    key={option.mode}
+                    variant={entityViewMode === option.mode ? 'primary' : 'secondary'}
+                    className="sidebar-action-button"
+                    onClick={() => setEntityViewMode(option.mode)}
+                  >
+                    {option.label}
+                  </AppButton>
+                ))}
+              </div>
               <AppButton className="sidebar-action-button" onClick={addEntity}>
                 <Plus size={16} /> 엔티티 생성
-              </AppButton>
-              <AppButton variant="secondary" className="sidebar-action-button" onClick={addNote}>
-                <MessageSquarePlus size={16} /> 메모 생성
               </AppButton>
               <AppButton variant="secondary" className="sidebar-action-button" onClick={handleStartRelationshipMode}>
                 <Link2 size={16} /> {relationshipDraft.active ? '관계 설정 종료' : '관계 설정'}
@@ -635,9 +906,9 @@ export function EditorPage() {
           </AppCard>
         </aside>
 
-        <section className="editor-canvas-region" ref={canvasRef}>
+        <section className="editor-canvas-region">
           <ReactFlowProvider>
-            <div className="editor-canvas-frame">
+            <div className="editor-canvas-frame" ref={canvasFrameRef}>
               <ReactFlow
                 nodes={nodes}
                 edges={edges}
@@ -662,8 +933,13 @@ export function EditorPage() {
                     }
                   });
                 }}
-                onNodeClick={(event, node) => handleNodeSelection(node.id, event)}
-                onEdgeClick={(_, edge) => setSelectedRelationshipId(edge.id)}
+                onNodeClick={(_, node) => handleNodeSelection(node.id)}
+                onEdgeClick={(_, edge) => {
+                  if (window.performance.now() < suppressRelationshipSelectionUntilRef.current) {
+                    return;
+                  }
+                  setSelectedRelationshipId(edge.id);
+                }}
                 onPaneClick={() => {
                   if (!relationshipDraft.active) {
                     setSelectedEntityId(null);
@@ -689,14 +965,8 @@ export function EditorPage() {
               {localError ? <div className="canvas-toast error">{localError}</div> : null}
 
               {relationshipDraft.popupPosition ? (
-                <div
-                  className="relationship-popup"
-                  style={{
-                    left: relationshipDraft.popupPosition.x,
-                    top: relationshipDraft.popupPosition.y
-                  }}
-                >
-                  <div className="relationship-popup-head">
+                <div className="relationship-popup" style={{ left: relationshipPopupPosition.x, top: relationshipPopupPosition.y }}>
+                  <div className="relationship-popup-head draggable-overlay-handle" onPointerDown={handleOverlayDragStart('relationship')}>
                     <strong>관계 옵션</strong>
                     <span>부모 {document.entities.find((entity) => entity.id === relationshipDraft.sourceEntityId)?.name ?? '-'}</span>
                     <span>자식 {document.entities.find((entity) => entity.id === relationshipDraft.targetEntityId)?.name ?? '-'}</span>
@@ -739,7 +1009,7 @@ export function EditorPage() {
                       <div>
                         <AppLabel>카디널리티</AppLabel>
                         <div className="relationship-radio-grid">
-                          {(['1:1', '1:N', 'N:1', 'N:M'] as Cardinality[]).map((option) => (
+                          {(['1:1', '1:N'] as Cardinality[]).map((option) => (
                             <label
                               key={option}
                               className={`relationship-radio ${relationshipDraft.cardinality === option ? 'active' : ''}`}
@@ -807,7 +1077,9 @@ export function EditorPage() {
               <CanvasSelectionCard
                 selectedEntity={selectedEntity}
                 selectedRelationship={selectedRelationship}
-                selectedNote={selectedNote}
+                viewMode={entityViewMode}
+                position={inspectorPosition}
+                onDragStart={handleOverlayDragStart}
                 updateEntity={updateEntity}
                 removeEntity={removeEntity}
                 addField={addField}
@@ -815,8 +1087,6 @@ export function EditorPage() {
                 removeField={removeField}
                 updateRelationship={updateRelationship}
                 removeRelationship={removeRelationship}
-                updateNote={updateNote}
-                removeNote={removeNote}
               />
             </div>
           </ReactFlowProvider>

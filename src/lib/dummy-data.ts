@@ -37,12 +37,15 @@ export function createSampleDocument(id = createId('erd')): ErdDocument {
       {
         id: userId,
         name: 'users',
+        logicalName: '사용자',
+        color: '#dbeafe',
         memo: '회원 정보를 저장한다.',
         position: { x: 120, y: 130 },
         fields: [
           {
             id: userPk,
             name: 'id',
+            logicalName: '사용자 ID',
             type: 'bigint',
             nullable: false,
             primaryKey: true,
@@ -51,6 +54,7 @@ export function createSampleDocument(id = createId('erd')): ErdDocument {
           {
             id: createId('field'),
             name: 'login_id',
+            logicalName: '로그인 아이디',
             type: 'varchar',
             length: '50',
             nullable: false,
@@ -59,6 +63,7 @@ export function createSampleDocument(id = createId('erd')): ErdDocument {
           {
             id: createId('field'),
             name: 'email',
+            logicalName: '이메일',
             type: 'varchar',
             length: '120',
             nullable: false,
@@ -69,12 +74,15 @@ export function createSampleDocument(id = createId('erd')): ErdDocument {
       {
         id: postId,
         name: 'posts',
+        logicalName: '게시글',
+        color: '#fde68a',
         memo: '게시글 정보를 저장한다.',
         position: { x: 520, y: 230 },
         fields: [
           {
             id: postPk,
             name: 'id',
+            logicalName: '게시글 ID',
             type: 'bigint',
             nullable: false,
             primaryKey: true
@@ -82,6 +90,7 @@ export function createSampleDocument(id = createId('erd')): ErdDocument {
           {
             id: postUserId,
             name: 'user_id',
+            logicalName: '작성자 ID',
             type: 'bigint',
             nullable: false,
             primaryKey: false,
@@ -90,6 +99,7 @@ export function createSampleDocument(id = createId('erd')): ErdDocument {
           {
             id: createId('field'),
             name: 'title',
+            logicalName: '제목',
             type: 'varchar',
             length: '120',
             nullable: false,
@@ -109,13 +119,7 @@ export function createSampleDocument(id = createId('erd')): ErdDocument {
         memo: '한 명의 사용자는 여러 게시글을 가질 수 있다.'
       }
     ],
-    notes: [
-      {
-        id: createId('note'),
-        content: '카디널리티와 FK 라벨을 함께 확인할 수 있다.',
-        position: { x: 280, y: 70 }
-      }
-    ],
+    notes: [],
     viewport: { x: 0, y: 0, zoom: 1 },
     updatedAt: nowIso(),
     version: 1

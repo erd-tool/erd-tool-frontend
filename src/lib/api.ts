@@ -106,7 +106,7 @@ function mapDocument(payload: {
 }
 
 export async function loginRequest(payload: { loginId: string; password: string }) {
-  const auth = await requestMaybeJson<{
+  const auth = await requestJson<{
     accessToken: string;
     userId: number;
     loginId: string;
@@ -115,7 +115,6 @@ export async function loginRequest(payload: { loginId: string; password: string 
     method: 'POST',
     body: JSON.stringify(payload)
   });
-  if (!auth) return null;
   return {
     id: auth.userId,
     loginId: auth.loginId,
@@ -125,7 +124,7 @@ export async function loginRequest(payload: { loginId: string; password: string 
 }
 
 export async function signupRequest(payload: { loginId: string; email: string; password: string; displayName: string }) {
-  const auth = await requestMaybeJson<{
+  const auth = await requestJson<{
     accessToken: string;
     userId: number;
     loginId: string;
@@ -134,7 +133,6 @@ export async function signupRequest(payload: { loginId: string; email: string; p
     method: 'POST',
     body: JSON.stringify(payload)
   });
-  if (!auth) return null;
   return {
     id: auth.userId,
     loginId: auth.loginId,
@@ -218,7 +216,7 @@ export async function saveErd(token: string | undefined, document: ErdDocument) 
 
 export async function createErd(token: string | undefined, title: string, teamId?: string) {
   const resolvedToken = resolveToken(token);
-  const response = await requestMaybeJson<{
+  const response = await requestJson<{
     id: number;
     title: string;
     description?: string;
@@ -231,12 +229,12 @@ export async function createErd(token: string | undefined, title: string, teamId
     headers: resolvedToken ? { Authorization: `Bearer ${resolvedToken}` } : {},
     body: JSON.stringify({ title, visibility: 'private', teamId: teamId ? Number(teamId) : null })
   });
-  return response ? mapErdSummary(response) : null;
+  return mapErdSummary(response);
 }
 
 export async function createTeam(token: string | undefined, name: string) {
   const resolvedToken = resolveToken(token);
-  const response = await requestMaybeJson<{
+  const response = await requestJson<{
     id: number;
     name: string;
     description?: string;
@@ -246,12 +244,12 @@ export async function createTeam(token: string | undefined, name: string) {
     headers: resolvedToken ? { Authorization: `Bearer ${resolvedToken}` } : {},
     body: JSON.stringify({ name })
   });
-  return response ? mapTeamSummary(response) : null;
+  return mapTeamSummary(response);
 }
 
 export async function inviteTeamMember(token: string | undefined, teamId: string, email: string) {
   const resolvedToken = resolveToken(token);
-  return requestMaybeJson<{ id: number; email: string; token: string; teamName: string }>(`/api/teams/${teamId}/invitations`, {
+  return requestJson<{ id: number; email: string; token: string; teamName: string }>(`/api/teams/${teamId}/invitations`, {
     method: 'POST',
     headers: resolvedToken ? { Authorization: `Bearer ${resolvedToken}` } : {},
     body: JSON.stringify({ email })

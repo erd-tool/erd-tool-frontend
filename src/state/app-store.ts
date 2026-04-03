@@ -62,6 +62,7 @@ interface AppState {
   }) => string | void;
   updateRelationship: (relationshipId: string, patch: Partial<RelationshipDefinition>) => void;
   removeRelationship: (relationshipId: string) => void;
+  moveRelationshipControlPoint: (relationshipId: string, controlPoint: { x: number; y: number }) => void;
   addNote: () => void;
   updateNote: (noteId: string, patch: Partial<NoteDefinition>) => void;
   removeNote: (noteId: string) => void;
@@ -90,12 +91,15 @@ function createBlankEntity(): EntityDefinition {
   return {
     id: createId('entity'),
     name: 'new_table',
+    logicalName: '새 엔티티',
+    color: '#fde68a',
     memo: '',
     position: { x: 160, y: 160 },
     fields: [
       {
         id: createId('field'),
         name: 'id',
+        logicalName: '식별자',
         type: 'bigint',
         nullable: false,
         primaryKey: true
@@ -322,8 +326,11 @@ export const useAppStore = create<AppState>()(
         entity.fields.push({
           id: createId('field'),
           name: 'new_field',
+          logicalName: '새 속성',
           type: 'varchar',
           length: '100',
+          defaultValue: '',
+          memo: '',
           nullable: true,
           primaryKey: false
         });
@@ -339,6 +346,22 @@ export const useAppStore = create<AppState>()(
         const field = entity?.fields.find((item) => item.id === fieldId);
         if (!field) return;
         Object.assign(field, patch);
+        if (patch.primaryKey !== undefined && entity) {
+          if (patch.primaryKey) {
+            field.nullable = false;
+            entity.fields = [
+              ...entity.fields.filter((item) => item.id !== field.id && item.primaryKey),
+              field,
+              ...entity.fields.filter((item) => item.id !== field.id && !item.primaryKey)
+            ];
+          } else {
+            entity.fields = [
+              ...entity.fields.filter((item) => item.id !== field.id && item.primaryKey),
+              ...entity.fields.filter((item) => item.id !== field.id && !item.primaryKey),
+              field
+            ];
+          }
+        }
         next.updatedAt = nowIso();
         next.version += 1;
         get().replaceDocument(next);
@@ -374,6 +397,7 @@ export const useAppStore = create<AppState>()(
           sourceEntity?.fields.find((field) => field.primaryKey) ??
           sourceEntity?.fields[0];
         const sourceFieldName = sourceField?.name ?? 'id';
+        const sourceFieldLogicalName = sourceField?.logicalName ?? sourceFieldName;
         const fallbackForeignKeyName = `${source.name.endsWith('s') ? source.name.slice(0, -1) : source.name}_${sourceFieldName}`;
         let targetField =
           targetEntity?.fields.find((field) => field.foreignKey === `${source.name}.${sourceFieldName}`) ??
@@ -392,8 +416,11 @@ export const useAppStore = create<AppState>()(
           targetField = {
             id: createId('field'),
             name: nextFieldName,
+            logicalName: sourceFieldLogicalName,
             type: sourceField?.type ?? 'bigint',
             length: sourceField?.length,
+            defaultValue: sourceField?.defaultValue,
+            memo: sourceField?.memo,
             nullable: !(config?.required ?? true),
             primaryKey: false,
             foreignKey: `${source.name}.${sourceFieldName}`
@@ -407,6 +434,9 @@ export const useAppStore = create<AppState>()(
           if (!targetField.primaryKey) {
             targetField.name = hasPrimaryKeyNameCollision ? fallbackForeignKeyName : sourceFieldName;
           }
+          if (!targetField.logicalName) {
+            targetField.logicalName = sourceFieldLogicalName;
+          }
           targetField.type = sourceField?.type ?? targetField.type;
           targetField.length = sourceField?.length;
           targetField.nullable = !(config?.required ?? true);
@@ -419,6 +449,7 @@ export const useAppStore = create<AppState>()(
           sourceFieldId: sourceField?.id,
           targetFieldId: targetField?.id,
           cardinality: config?.cardinality ?? '1:N',
+          curveOffset: 0,
           identifying: config?.identifying ?? false,
           required: config?.required ?? true,
           memo: config?.memo ?? ''
@@ -454,15 +485,35 @@ export const useAppStore = create<AppState>()(
         if (relationship?.targetEntityId && relationship.targetFieldId) {
           const targetEntity = next.entities.find((item) => item.id === relationship.targetEntityId);
           const targetField = targetEntity?.fields.find((field) => field.id === relationship.targetFieldId);
-          if (targetField && !targetField.primaryKey) {
-            targetField.foreignKey = undefined;
-            targetField.nullable = true;
+          const isSharedTargetField = next.relationships.some(
+            (item) =>
+              item.id !== relationshipId &&
+              item.targetEntityId === relationship.targetEntityId &&
+              item.targetFieldId === relationship.targetFieldId
+          );
+          if (targetEntity && targetField && !targetField.primaryKey) {
+            if (!isSharedTargetField) {
+              targetEntity.fields = targetEntity.fields.filter((field) => field.id !== relationship.targetFieldId);
+            }
           }
         }
         next.relationships = next.relationships.filter((item) => item.id !== relationshipId);
         next.updatedAt = nowIso();
         next.version += 1;
         get().replaceDocument(next);
+      },
+      moveRelationshipControlPoint: (relationshipId, controlPoint) => {
+        const active = findActiveWorkspace(get());
+        if (!active?.workspace) return;
+        const next = structuredClone(active.workspace.document);
+        const relationship = next.relationships.find((item) => item.id === relationshipId);
+        if (!relationship) return;
+        relationship.controlOffset = controlPoint;
+        delete relationship.controlPoint;
+        relationship.curveOffset = 0;
+        next.updatedAt = nowIso();
+        next.version += 1;
+        get().replaceDocument(next, { pushHistory: false });
       },
       addNote: () => {
         const active = findActiveWorkspace(get());

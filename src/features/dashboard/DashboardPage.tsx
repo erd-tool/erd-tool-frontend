@@ -5,6 +5,8 @@ import { createTeam, createErd, fetchErds, fetchTeams, inviteTeamMember } from '
 import { formatDate, nowIso } from '../../lib/storage';
 import { useAppStore } from '../../state/app-store';
 
+const LOCAL_DEMO_ENABLED = import.meta.env.VITE_ENABLE_LOCAL_DEMO === 'true';
+
 export function DashboardPage() {
   const navigate = useNavigate();
   const session = useAppStore((state) => state.session);
@@ -16,15 +18,22 @@ export function DashboardPage() {
   const createTeamLocal = useAppStore((state) => state.createTeamLocal);
   const createErdLocal = useAppStore((state) => state.createErdLocal);
   const [inviteToken, setInviteToken] = useState('');
+  const [actionError, setActionError] = useState('');
 
   useEffect(() => {
     if (!token || token === 'local-demo-token') return;
     let cancelled = false;
-    void Promise.all([fetchTeams(token), fetchErds(token)]).then(([remoteTeams, remoteErds]) => {
-      if (cancelled) return;
-      if (remoteTeams) setTeams(remoteTeams);
-      if (remoteErds) setErds(remoteErds);
-    });
+    void Promise.all([fetchTeams(token), fetchErds(token)])
+      .then(([remoteTeams, remoteErds]) => {
+        if (cancelled) return;
+        if (remoteTeams) setTeams(remoteTeams);
+        if (remoteErds) setErds(remoteErds);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setActionError('대시보드 데이터를 불러오지 못했습니다.');
+        }
+      });
     return () => {
       cancelled = true;
     };
@@ -35,14 +44,21 @@ export function DashboardPage() {
     const formEl = event.currentTarget;
     const form = new FormData(event.currentTarget);
     const name = String(form.get('teamName') ?? '새 팀').trim();
-    const remote = await createTeam(token, name);
-    if (remote) {
-      setTeams([remote, ...teams.filter((team) => team.id !== remote.id)]);
+    setActionError('');
+
+    if (token === 'local-demo-token' && LOCAL_DEMO_ENABLED) {
+      createTeamLocal(name);
       formEl.reset();
       return;
     }
-    createTeamLocal(name);
-    formEl.reset();
+
+    try {
+      const remote = await createTeam(token, name);
+      setTeams([remote, ...teams.filter((team) => team.id !== remote.id)]);
+      formEl.reset();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : '팀 생성에 실패했습니다.');
+    }
   }
 
   async function handleCreateErd(event: FormEvent<HTMLFormElement>) {
@@ -51,16 +67,23 @@ export function DashboardPage() {
     const form = new FormData(event.currentTarget);
     const title = String(form.get('erdTitle') ?? '새 ERD').trim();
     const teamId = String(form.get('teamId') ?? '').trim() || undefined;
-    const remote = await createErd(token, title, teamId);
-    if (remote) {
+    setActionError('');
+
+    if (token === 'local-demo-token' && LOCAL_DEMO_ENABLED) {
+      const local = createErdLocal(title, teamId ?? null);
+      formEl.reset();
+      navigate(`/app/erd/${local.id}`);
+      return;
+    }
+
+    try {
+      const remote = await createErd(token, title, teamId);
       setErds([remote, ...erds.filter((erd) => erd.id !== remote.id)]);
       formEl.reset();
       navigate(`/app/erd/${remote.id}`);
-      return;
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'ERD 생성에 실패했습니다.');
     }
-    const local = createErdLocal(title, teamId ?? null);
-    formEl.reset();
-    navigate(`/app/erd/${local.id}`);
   }
 
   async function handleInvite(event: FormEvent<HTMLFormElement>) {
@@ -70,9 +93,21 @@ export function DashboardPage() {
     const teamId = String(form.get('inviteTeamId') ?? '').trim();
     const email = String(form.get('inviteEmail') ?? '').trim();
     if (!teamId || !email) return;
-    const invitation = await inviteTeamMember(token, teamId, email);
-    setInviteToken(invitation?.token ?? '로컬 데모 모드에서는 초대 토큰이 생성되지 않습니다.');
-    formEl.reset();
+    setActionError('');
+
+    if (token === 'local-demo-token' && LOCAL_DEMO_ENABLED) {
+      setInviteToken('로컬 데모 모드에서는 초대 토큰이 생성되지 않습니다.');
+      formEl.reset();
+      return;
+    }
+
+    try {
+      const invitation = await inviteTeamMember(token, teamId, email);
+      setInviteToken(invitation.token);
+      formEl.reset();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : '팀 초대에 실패했습니다.');
+    }
   }
 
   return (
@@ -82,6 +117,7 @@ export function DashboardPage() {
           <StatusPill tone="success">협업 준비 완료</StatusPill>
           <h2>안녕하세요, {session?.displayName ?? '사용자'}님</h2>
           <p>개인 ERD와 팀 ERD를 한곳에서 관리하고, 바로 편집으로 이동할 수 있습니다.</p>
+          {actionError && <p className="error-text">{actionError}</p>}
         </div>
         <div className="hero-metrics">
           <AppCard className="metric-card">

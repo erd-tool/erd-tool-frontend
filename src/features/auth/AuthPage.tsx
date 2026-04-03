@@ -5,6 +5,8 @@ import { loginRequest, signupRequest } from '../../lib/api';
 import { createSampleSession } from '../../lib/dummy-data';
 import { useAppStore } from '../../state/app-store';
 
+const LOCAL_DEMO_ENABLED = import.meta.env.VITE_ENABLE_LOCAL_DEMO === 'true';
+
 export function AuthPage() {
   const navigate = useNavigate();
   const setSession = useAppStore((state) => state.setSession);
@@ -28,9 +30,10 @@ export function AuthPage() {
         mode === 'login'
           ? await loginRequest({ loginId, password })
           : await signupRequest({ loginId, email, password, displayName });
-      if (session) {
-        setSession(session);
-      } else {
+      setSession(session);
+      navigate('/app', { replace: true });
+    } catch (err) {
+      if (LOCAL_DEMO_ENABLED) {
         setSession({
           ...createSampleSession(),
           loginId,
@@ -39,9 +42,9 @@ export function AuthPage() {
           token: 'local-demo-token'
         });
         ensureSeedData();
+        navigate('/app', { replace: true });
+        return;
       }
-      navigate('/app', { replace: true });
-    } catch (err) {
       setError(err instanceof Error ? err.message : '인증에 실패했습니다.');
     } finally {
       setLoading(false);
@@ -104,7 +107,11 @@ export function AuthPage() {
             <AppLabel>안내</AppLabel>
             <AppTextarea
               readOnly
-              value="백엔드가 아직 연결되지 않은 경우에도 로컬 세션으로 진입하여 화면 동작을 확인할 수 있습니다."
+              value={
+                LOCAL_DEMO_ENABLED
+                  ? '백엔드가 아직 연결되지 않은 경우 로컬 데모 세션으로 진입할 수 있습니다.'
+                  : '백엔드 인증이 정상 동작해야 앱에 진입할 수 있습니다.'
+              }
             />
           </div>
 
