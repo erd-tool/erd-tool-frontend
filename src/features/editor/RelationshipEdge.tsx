@@ -16,9 +16,8 @@ function notifyRelationshipDragFinished(relationshipId: string) {
   );
 }
 
-function getBadgeToken(side: '1' | 'N', required: boolean) {
-  if (side === '1') return required ? '||' : 'o|';
-  return required ? '|<' : 'o<';
+function getBadgeToken(side: '1' | 'N') {
+  return side;
 }
 
 function getQuadraticPoint(
@@ -227,7 +226,7 @@ export function RelationshipEdge({
             transform: `translate(-50%, -50%) translate(${sourceBadge.x}px, ${sourceBadge.y}px)`
           }}
         >
-          {getBadgeToken(sourceCardinality, true)}
+          {getBadgeToken(sourceCardinality)}
         </div>
         <div
           className={`relationship-center-chip ${selected ? 'selected' : ''}`}
@@ -245,7 +244,7 @@ export function RelationshipEdge({
             transform: `translate(-50%, -50%) translate(${targetBadge.x}px, ${targetBadge.y}px)`
           }}
         >
-          {getBadgeToken(targetCardinality, relationship.required ?? true)}
+          {getBadgeToken(targetCardinality)}
         </div>
       </EdgeLabelRenderer>
     </>

@@ -108,6 +108,26 @@ function createBlankEntity(): EntityDefinition {
   };
 }
 
+function buildForeignKeyName(sourceEntityName: string, sourceFieldName: string, existingNames: string[]) {
+  const singularSourceName = sourceEntityName.endsWith('s') ? sourceEntityName.slice(0, -1) : sourceEntityName;
+  const candidates = [
+    sourceFieldName,
+    `${singularSourceName}_${sourceFieldName}`
+  ];
+
+  for (const candidate of candidates) {
+    if (!existingNames.includes(candidate)) {
+      return candidate;
+    }
+  }
+
+  let suffix = 2;
+  while (existingNames.includes(`${singularSourceName}_${sourceFieldName}_${suffix}`)) {
+    suffix += 1;
+  }
+  return `${singularSourceName}_${sourceFieldName}_${suffix}`;
+}
+
 export const useAppStore = create<AppState>()(
   persist(
     (set, get) => ({
@@ -398,21 +418,16 @@ export const useAppStore = create<AppState>()(
           sourceEntity?.fields[0];
         const sourceFieldName = sourceField?.name ?? 'id';
         const sourceFieldLogicalName = sourceField?.logicalName ?? sourceFieldName;
-        const fallbackForeignKeyName = `${source.name.endsWith('s') ? source.name.slice(0, -1) : source.name}_${sourceFieldName}`;
+        const foreignKeyReference = `${source.name}.${sourceFieldName}`;
         let targetField =
-          targetEntity?.fields.find((field) => field.foreignKey === `${source.name}.${sourceFieldName}`) ??
-          targetEntity?.fields.find((field) => !field.primaryKey && field.name === sourceFieldName) ??
-          targetEntity?.fields.find((field) => !field.primaryKey && field.name === fallbackForeignKeyName) ??
-          targetEntity?.fields.find((field) => !field.primaryKey);
+          targetEntity?.fields.find((field) => field.foreignKey === foreignKeyReference);
 
-        const shouldCreateField =
-          !targetField ||
-          (targetField.primaryKey && targetField.name === sourceFieldName);
-
-        if (shouldCreateField && targetEntity) {
-          const nextFieldName = targetEntity.fields.some((field) => field.name === sourceFieldName && !field.primaryKey)
-            ? fallbackForeignKeyName
-            : sourceFieldName;
+        if (!targetField && targetEntity) {
+          const nextFieldName = buildForeignKeyName(
+            source.name,
+            sourceFieldName,
+            targetEntity.fields.map((field) => field.name)
+          );
           targetField = {
             id: createId('field'),
             name: nextFieldName,
@@ -423,24 +438,19 @@ export const useAppStore = create<AppState>()(
             memo: sourceField?.memo,
             nullable: !(config?.required ?? true),
             primaryKey: false,
-            foreignKey: `${source.name}.${sourceFieldName}`
+            foreignKey: foreignKeyReference
           };
           targetEntity.fields.splice(1, 0, targetField);
         }
 
         if (targetField) {
-          const hasPrimaryKeyNameCollision =
-            targetEntity?.fields.some((field) => field.primaryKey && field.name === sourceFieldName && field.id !== targetField?.id) ?? false;
-          if (!targetField.primaryKey) {
-            targetField.name = hasPrimaryKeyNameCollision ? fallbackForeignKeyName : sourceFieldName;
-          }
           if (!targetField.logicalName) {
             targetField.logicalName = sourceFieldLogicalName;
           }
           targetField.type = sourceField?.type ?? targetField.type;
           targetField.length = sourceField?.length;
           targetField.nullable = !(config?.required ?? true);
-          targetField.foreignKey = `${source.name}.${sourceFieldName}`;
+          targetField.foreignKey = foreignKeyReference;
         }
         next.relationships.push({
           id: relationId,

@@ -33,6 +33,7 @@ import { toPng } from 'html-to-image';
 import { AppButton, AppCard, AppInput, AppLabel, AppTextarea, StatusPill } from '../../components/ui';
 import { fetchErd, saveErd } from '../../lib/api';
 import { generateDdl } from '../../lib/ddl';
+import { isServerErdId } from '../../lib/erd-id';
 import { downloadText, formatDate, nowIso } from '../../lib/storage';
 import { useYjsCollaboration } from '../../lib/yjs';
 import { useAppStore } from '../../state/app-store';
@@ -116,6 +117,10 @@ function getEstimatedEntityHeight(entity: EntityDefinition, viewMode: EntityView
   const rowHeight = viewMode === 'both' ? 54 : 42;
   const memoHeight = entity.memo ? 48 : 0;
   return headerHeight + entity.fields.length * rowHeight + memoHeight + 28;
+}
+
+function getEstimatedEntityWidth(viewMode: EntityViewMode) {
+  return viewMode === 'both' ? 320 : 280;
 }
 
 function getFieldHeaderLabels(viewMode: EntityViewMode) {
@@ -342,6 +347,7 @@ function CanvasSelectionCard({
 export function EditorPage() {
   const params = useParams();
   const erdId = params.erdId;
+  const isServerDocument = isServerErdId(erdId);
   const navigate = useNavigate();
   const session = useAppStore((state) => state.session);
   const workspace = useAppStore((state) => (erdId ? state.documents[erdId] : undefined));
@@ -403,7 +409,7 @@ export function EditorPage() {
   }, [erdId, setActiveErd]);
 
   useEffect(() => {
-    if (!erdId || !session?.token || workspace?.document) return;
+    if (!isServerDocument || !session?.token || workspace?.document) return;
     let cancelled = false;
     void fetchErd(session.token, erdId).then((remote) => {
       if (cancelled || !remote) return;
@@ -414,10 +420,10 @@ export function EditorPage() {
     return () => {
       cancelled = true;
     };
-  }, [erdId, putDocument, session?.token, workspace?.document]);
+  }, [erdId, isServerDocument, putDocument, session?.token, workspace?.document]);
 
   useEffect(() => {
-    if (!workspace?.document || !session || !erdId) return;
+    if (!isServerDocument || !workspace?.document || !session || !erdId) return;
     let cancelled = false;
     const timer = window.setTimeout(async () => {
       const signature = getAutoSaveSignature(workspace.document);
@@ -450,15 +456,19 @@ export function EditorPage() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [erdId, replaceDocument, session, workspace?.document]);
+  }, [erdId, isServerDocument, replaceDocument, session, workspace?.document]);
 
   const collaboration = useYjsCollaboration(erdId, workspace?.document, session, (next) => {
     replaceDocument(next, { pushHistory: false });
   });
 
   useEffect(() => {
+    if (!isServerDocument || session?.token === 'local-demo-token') {
+      setCollaborationState('local', 1);
+      return;
+    }
     setCollaborationState(collaboration.status, collaboration.peers);
-  }, [collaboration.peers, collaboration.status, setCollaborationState]);
+  }, [collaboration.peers, collaboration.status, isServerDocument, session?.token, setCollaborationState]);
 
   useEffect(() => {
     if (!workspace?.document) return;
@@ -628,6 +638,8 @@ export function EditorPage() {
     id: entity.id,
     type: 'entityNode',
     position: entity.position,
+    initialWidth: getEstimatedEntityWidth(entityViewMode),
+    initialHeight: getEstimatedEntityHeight(entity, entityViewMode),
     data: { entity, viewMode: entityViewMode },
     className:
       relationshipDraft.sourceEntityId === entity.id
@@ -757,7 +769,7 @@ export function EditorPage() {
     const exportNodes = document.entities.map((entity) => ({
       id: entity.id,
       position: entity.position,
-      width: 300,
+      width: getEstimatedEntityWidth(entityViewMode),
       height: getEstimatedEntityHeight(entity, entityViewMode),
       data: {}
     }));

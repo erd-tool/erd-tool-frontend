@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
+import { isServerErdId } from './erd-id';
 import type { ErdDocument, UserSession } from './types';
 
 type CollaborationStatus = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'error';
@@ -29,7 +30,7 @@ export function useYjsCollaboration(
   }, [onRemoteChange]);
 
   useEffect(() => {
-    if (!erdId || !session) {
+    if (!session || !isServerErdId(erdId) || session.token === 'local-demo-token') {
       setStatus('idle');
       return undefined;
     }
