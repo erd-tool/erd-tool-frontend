@@ -2,17 +2,20 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AppButton, AppCard, AppInput, AppLabel, StatusPill } from '../../components/ui';
 import {
+  acceptTeamInvitation,
   createErd,
   createTeam,
   deleteErdRequest,
   deleteTeamRequest,
   fetchErds,
+  fetchTeamInvitations,
   fetchTeams,
-  inviteTeamMember
+  inviteTeamMember,
+  rejectTeamInvitation
 } from '../../lib/api';
 import { nowIso, formatDate } from '../../lib/storage';
 import { getSeasonTheme } from '../../lib/theme';
-import type { ErdSummary } from '../../lib/types';
+import type { ErdSummary, TeamInvitationSummary } from '../../lib/types';
 import { useAppStore } from '../../state/app-store';
 
 const LOCAL_DEMO_ENABLED = import.meta.env.VITE_ENABLE_LOCAL_DEMO === 'true';
@@ -39,8 +42,9 @@ export function DashboardPage() {
   const [teamName, setTeamName] = useState('');
   const [personalErdTitle, setPersonalErdTitle] = useState('');
   const [teamErdTitle, setTeamErdTitle] = useState('');
-  const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteToken, setInviteToken] = useState('');
+  const [inviteLoginId, setInviteLoginId] = useState('');
+  const [inviteResult, setInviteResult] = useState('');
+  const [pendingInvitations, setPendingInvitations] = useState<TeamInvitationSummary[]>([]);
   const [actionError, setActionError] = useState('');
   const [createTeamTargetId, setCreateTeamTargetId] = useState('');
   const [inviteTargetTeamId, setInviteTargetTeamId] = useState('');
@@ -50,11 +54,12 @@ export function DashboardPage() {
     if (!token || token === 'local-demo-token') return;
     let cancelled = false;
 
-    void Promise.all([fetchTeams(token), fetchErds(token)])
-      .then(([remoteTeams, remoteErds]) => {
+    void Promise.all([fetchTeams(token), fetchErds(token), fetchTeamInvitations(token)])
+      .then(([remoteTeams, remoteErds, remoteInvitations]) => {
         if (cancelled) return;
         if (remoteTeams) setTeams(remoteTeams);
         if (remoteErds) setErds(remoteErds);
+        setPendingInvitations((remoteInvitations ?? []).filter((invitation) => invitation.status === 'PENDING'));
       })
       .catch(() => {
         if (!cancelled) {
@@ -144,21 +149,50 @@ export function DashboardPage() {
 
   async function handleInvite(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!inviteTargetTeamId || !inviteEmail.trim()) return;
+    if (!inviteTargetTeamId || !inviteLoginId.trim()) return;
     setActionError('');
+    setInviteResult('');
 
     if (token === 'local-demo-token' && LOCAL_DEMO_ENABLED) {
-      setInviteToken('로컬 데모 모드에서는 초대 토큰이 생성되지 않습니다.');
-      setInviteEmail('');
+      setInviteResult('로컬 데모 모드에서는 초대 기능이 제한됩니다.');
+      setInviteLoginId('');
       return;
     }
 
     try {
-      const invitation = await inviteTeamMember(token, inviteTargetTeamId, inviteEmail.trim());
-      setInviteToken(invitation.token);
-      setInviteEmail('');
+      const invitation = await inviteTeamMember(token, inviteTargetTeamId, inviteLoginId.trim());
+      setInviteResult(`${invitation.inviteeDisplayName} (${invitation.inviteeLoginId}) 계정을 ${invitation.teamName} 팀에 초대했습니다.`);
+      setTeams(
+        teams.map((team) =>
+          team.id === invitation.teamId
+            ? { ...team, invitationCount: team.invitationCount + 1 }
+            : team
+        )
+      );
+      setInviteLoginId('');
     } catch (error) {
       setActionError(error instanceof Error ? error.message : '팀 초대에 실패했습니다.');
+    }
+  }
+
+  async function handleAcceptInvitation(invitation: TeamInvitationSummary) {
+    setActionError('');
+    try {
+      const acceptedTeam = await acceptTeamInvitation(token, invitation.id);
+      setTeams([acceptedTeam, ...teams.filter((team) => team.id !== acceptedTeam.id)]);
+      setPendingInvitations(pendingInvitations.filter((item) => item.id !== invitation.id));
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : '초대 수락에 실패했습니다.');
+    }
+  }
+
+  async function handleRejectInvitation(invitation: TeamInvitationSummary) {
+    setActionError('');
+    try {
+      await rejectTeamInvitation(token, invitation.id);
+      setPendingInvitations(pendingInvitations.filter((item) => item.id !== invitation.id));
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : '초대 거절에 실패했습니다.');
     }
   }
 
@@ -201,6 +235,7 @@ export function DashboardPage() {
   const teamErds = erds.filter((erd) => Boolean(erd.teamId));
   const totalCollaborators = erds.reduce((sum, item) => sum + item.collaboratorCount, 0);
   const collaborationLabel = teams.length > 0 ? `${teams.length}개 팀 연결` : '개인 작업 모드';
+  const pendingInvitationCount = pendingInvitations.length;
 
   const renderErdList = (items: ErdSummary[], emptyTitle: string, emptyDescription: string) => {
     if (items.length === 0) {
@@ -245,6 +280,7 @@ export function DashboardPage() {
             <div className="hero-badges">
               <StatusPill tone="success">협업 준비 완료</StatusPill>
               <StatusPill tone={teams.length > 0 ? 'info' : 'neutral'}>{collaborationLabel}</StatusPill>
+              {pendingInvitationCount > 0 && <StatusPill tone="warning">받은 초대 {pendingInvitationCount}건</StatusPill>}
               <StatusPill tone="warning">{theme.label}</StatusPill>
             </div>
             <div>
@@ -278,12 +314,12 @@ export function DashboardPage() {
             <strong>{teams.length}개</strong>
           </div>
           <div>
-            <span>접속자 합계</span>
-            <strong>{totalCollaborators}명</strong>
+            <span>받은 초대</span>
+            <strong>{pendingInvitationCount}건</strong>
           </div>
           <div>
-            <span>상태</span>
-            <strong>자동 저장 활성</strong>
+            <span>접속자 합계</span>
+            <strong>{totalCollaborators}명</strong>
           </div>
           <div>
             <span>기준 시각</span>
@@ -314,7 +350,7 @@ export function DashboardPage() {
                 />
               </div>
               <p className="helper-text">팀 문서로 확장하기 전에 개인 초안을 빠르게 열어 두기 좋습니다.</p>
-              <AppButton type="submit" variant="secondary">
+              <AppButton type="submit">
                 개인 ERD 생성
               </AppButton>
             </form>
@@ -406,14 +442,13 @@ export function DashboardPage() {
 
               <form className="dashboard-create-stack" onSubmit={handleInvite}>
                 <div>
-                  <AppLabel htmlFor="invite-email">초대 이메일</AppLabel>
+                  <AppLabel htmlFor="invite-login-id">초대할 아이디</AppLabel>
                   <AppInput
-                    id="invite-email"
-                    name="inviteEmail"
-                    type="email"
-                    placeholder="member@example.com"
-                    value={inviteEmail}
-                    onChange={(event) => setInviteEmail(event.target.value)}
+                    id="invite-login-id"
+                    name="inviteLoginId"
+                    placeholder="예: test1"
+                    value={inviteLoginId}
+                    onChange={(event) => setInviteLoginId(event.target.value)}
                     required
                     disabled={teams.length === 0}
                   />
@@ -424,9 +459,49 @@ export function DashboardPage() {
                 <AppButton type="submit" variant="secondary" disabled={teams.length === 0}>
                   팀원 초대
                 </AppButton>
-                {inviteToken && <p className="helper-text">초대 토큰: {inviteToken}</p>}
+                {inviteResult && <p className="helper-text">{inviteResult}</p>}
               </form>
             </div>
+          </AppCard>
+
+          <AppCard className="dashboard-card">
+            <div className="section-head compact">
+              <div>
+                <h3>받은 초대</h3>
+                <p>내 아이디로 도착한 팀 초대를 확인하고 바로 수락하거나 거절합니다.</p>
+              </div>
+            </div>
+            {pendingInvitations.length > 0 ? (
+              <div className="list">
+                {pendingInvitations.map((invitation) => (
+                  <div key={invitation.id} className="list-item plain">
+                    <div>
+                      <strong>{invitation.teamName}</strong>
+                      <span>
+                        {invitation.inviteeDisplayName} ({invitation.inviteeLoginId}) · 만료 {formatDate(invitation.expiresAt)}
+                      </span>
+                    </div>
+                    <div className="list-actions">
+                      <AppButton className="list-action-button" onClick={() => handleAcceptInvitation(invitation)}>
+                        수락
+                      </AppButton>
+                      <AppButton
+                        variant="secondary"
+                        className="list-action-button"
+                        onClick={() => handleRejectInvitation(invitation)}
+                      >
+                        거절
+                      </AppButton>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={EMPTY_STATE_STYLE}>
+                <strong>받은 초대가 없습니다.</strong>
+                <p className="helper-text">다른 팀에서 아이디로 초대하면 이 영역에 바로 나타납니다.</p>
+              </div>
+            )}
           </AppCard>
 
           <AppCard className="dashboard-card">

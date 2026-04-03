@@ -1,6 +1,6 @@
 import { generateDdl } from './ddl';
 import { nowIso } from './storage';
-import type { Dialect, ErdDocument, ErdSummary, ErdVisibility, TeamSummary, UserSession } from './types';
+import type { Dialect, ErdDocument, ErdSummary, ErdVisibility, TeamInvitationSummary, TeamSummary, UserSession } from './types';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080';
 
@@ -163,15 +163,40 @@ function mapTeamSummary(payload: {
   name: string;
   description?: string;
   role?: string;
+  memberCount?: number;
+  invitationCount?: number;
+  updatedAt?: string;
 }): TeamSummary {
   return {
     id: String(payload.id),
     name: payload.name,
     description: payload.description ?? '',
     role: payload.role,
-    memberCount: 1,
-    invitationCount: 0,
-    updatedAt: nowIso()
+    memberCount: payload.memberCount ?? 1,
+    invitationCount: payload.invitationCount ?? 0,
+    updatedAt: payload.updatedAt ?? nowIso()
+  };
+}
+
+function mapInvitationSummary(payload: {
+  id: number;
+  teamId: number;
+  teamName: string;
+  inviteeLoginId: string;
+  inviteeDisplayName: string;
+  status: 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED';
+  expiresAt: string;
+  createdAt: string;
+}): TeamInvitationSummary {
+  return {
+    id: String(payload.id),
+    teamId: String(payload.teamId),
+    teamName: payload.teamName,
+    inviteeLoginId: payload.inviteeLoginId,
+    inviteeDisplayName: payload.inviteeDisplayName,
+    status: payload.status,
+    expiresAt: payload.expiresAt,
+    createdAt: payload.createdAt
   };
 }
 
@@ -263,10 +288,30 @@ export async function fetchTeams(token?: string) {
     name: string;
     description?: string;
     role?: string;
+    memberCount?: number;
+    invitationCount?: number;
+    updatedAt?: string;
   }>>('/api/teams', {
     headers: resolvedToken ? { Authorization: `Bearer ${resolvedToken}` } : {}
   });
   return response?.map(mapTeamSummary) ?? null;
+}
+
+export async function fetchTeamInvitations(token?: string) {
+  const resolvedToken = resolveToken(token);
+  const response = await requestMaybeJson<Array<{
+    id: number;
+    teamId: number;
+    teamName: string;
+    inviteeLoginId: string;
+    inviteeDisplayName: string;
+    status: 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED';
+    expiresAt: string;
+    createdAt: string;
+  }>>('/api/teams/invitations', {
+    headers: resolvedToken ? { Authorization: `Bearer ${resolvedToken}` } : {}
+  });
+  return response?.map(mapInvitationSummary) ?? null;
 }
 
 export async function fetchErds(token?: string) {
@@ -353,6 +398,9 @@ export async function createTeam(token: string | undefined, name: string) {
     name: string;
     description?: string;
     role?: string;
+    memberCount?: number;
+    invitationCount?: number;
+    updatedAt?: string;
   }>('/api/teams', {
     method: 'POST',
     headers: resolvedToken ? { Authorization: `Bearer ${resolvedToken}` } : {},
@@ -377,12 +425,47 @@ export async function deleteTeamRequest(token: string | undefined, teamId: strin
   });
 }
 
-export async function inviteTeamMember(token: string | undefined, teamId: string, email: string) {
+export async function inviteTeamMember(token: string | undefined, teamId: string, loginId: string) {
   const resolvedToken = resolveToken(token);
-  return requestJson<{ id: number; email: string; token: string; teamName: string }>(`/api/teams/${teamId}/invitations`, {
+  const response = await requestJson<{
+    id: number;
+    teamId: number;
+    teamName: string;
+    inviteeLoginId: string;
+    inviteeDisplayName: string;
+    status: 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED';
+    expiresAt: string;
+    createdAt: string;
+  }>(`/api/teams/${teamId}/invitations`, {
     method: 'POST',
     headers: resolvedToken ? { Authorization: `Bearer ${resolvedToken}` } : {},
-    body: JSON.stringify({ email })
+    body: JSON.stringify({ loginId })
+  });
+  return mapInvitationSummary(response);
+}
+
+export async function acceptTeamInvitation(token: string | undefined, invitationId: string) {
+  const resolvedToken = resolveToken(token);
+  const response = await requestJson<{
+    id: number;
+    name: string;
+    description?: string;
+    role?: string;
+    memberCount?: number;
+    invitationCount?: number;
+    updatedAt?: string;
+  }>(`/api/teams/invitations/${invitationId}/accept`, {
+    method: 'POST',
+    headers: resolvedToken ? { Authorization: `Bearer ${resolvedToken}` } : {}
+  });
+  return mapTeamSummary(response);
+}
+
+export async function rejectTeamInvitation(token: string | undefined, invitationId: string) {
+  const resolvedToken = resolveToken(token);
+  await request<void>(`/api/teams/invitations/${invitationId}/reject`, {
+    method: 'POST',
+    headers: resolvedToken ? { Authorization: `Bearer ${resolvedToken}` } : {}
   });
 }
 

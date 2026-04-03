@@ -23,6 +23,17 @@ export interface TeamSummary {
   updatedAt: string;
 }
 
+export interface TeamInvitationSummary {
+  id: string;
+  teamId: string;
+  teamName: string;
+  inviteeLoginId: string;
+  inviteeDisplayName: string;
+  status: 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED';
+  expiresAt: string;
+  createdAt: string;
+}
+
 export interface ErdSummary {
   id: string;
   title: string;

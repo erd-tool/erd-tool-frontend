@@ -39,6 +39,8 @@ interface AppState {
   setActiveErd: (id: string) => void;
   createTeamLocal: (name: string) => TeamSummary;
   createErdLocal: (title: string, teamId?: string | null) => ErdSummary;
+  deleteTeamLocal: (teamId: string) => void;
+  deleteErdLocal: (erdId: string) => void;
   replaceDocument: (document: ErdDocument, options?: { pushHistory?: boolean }) => void;
   setDocumentTitle: (title: string) => void;
   setDocumentDescription: (description: string) => void;
@@ -178,10 +180,15 @@ export const useAppStore = create<AppState>()(
       logout: () =>
         set({
           session: null,
+          teams: [],
+          erds: [],
+          documents: {},
           activeErdId: null,
           selectedEntityId: null,
           selectedRelationshipId: null,
-          selectedNoteId: null
+          selectedNoteId: null,
+          collaboratorStatus: 'idle',
+          collaboratorPeers: 1
         }),
       setActiveErd: (id) => set({ activeErdId: id, selectedEntityId: null, selectedRelationshipId: null, selectedNoteId: null }),
       createTeamLocal: (name) => {
@@ -215,6 +222,31 @@ export const useAppStore = create<AppState>()(
         }));
         return erd;
       },
+      deleteTeamLocal: (teamId) =>
+        set((state) => {
+          const removedErdIds = state.erds.filter((erd) => erd.teamId === teamId).map((erd) => erd.id);
+          const nextDocuments = { ...state.documents };
+          removedErdIds.forEach((erdId) => {
+            delete nextDocuments[erdId];
+          });
+          return {
+            teams: state.teams.filter((team) => team.id !== teamId),
+            erds: state.erds.filter((erd) => erd.teamId !== teamId),
+            documents: nextDocuments,
+            activeErdId:
+              state.activeErdId && removedErdIds.includes(state.activeErdId) ? null : state.activeErdId
+          };
+        }),
+      deleteErdLocal: (erdId) =>
+        set((state) => {
+          const nextDocuments = { ...state.documents };
+          delete nextDocuments[erdId];
+          return {
+            erds: state.erds.filter((erd) => erd.id !== erdId),
+            documents: nextDocuments,
+            activeErdId: state.activeErdId === erdId ? null : state.activeErdId
+          };
+        }),
       replaceDocument: (document, options) => {
         const active = findActiveWorkspace(get());
         if (!active) return;
