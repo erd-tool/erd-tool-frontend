@@ -441,27 +441,27 @@ select:focus-visible {
   padding: 12px 16px;
   position: relative;
   overflow: hidden;
-  background: linear-gradient(135deg, #2563eb, #3b82f6 55%, #60a5fa);
+  background: linear-gradient(135deg, var(--primary-strong), var(--primary) 58%, color-mix(in srgb, var(--accent) 28%, var(--primary) 72%));
   color: #fff;
   font-weight: 700;
-  border: 1px solid rgba(37, 99, 235, 0.18);
+  border: 1px solid color-mix(in srgb, var(--primary) 58%, white 42%);
   box-shadow:
-    0 14px 28px rgba(37, 99, 235, 0.22),
+    0 14px 28px var(--primary-glow),
     inset 0 1px 0 rgba(255, 255, 255, 0.26);
 }
 
 .app-button.secondary {
-  background: rgba(255, 255, 255, 0.82);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), color-mix(in srgb, var(--primary-soft) 62%, white 38%));
   color: var(--text);
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.05);
+  border: 1px solid color-mix(in srgb, var(--primary) 16%, white 84%);
+  box-shadow: 0 10px 20px color-mix(in srgb, var(--primary-glow) 50%, rgba(15, 23, 42, 0.04) 50%);
 }
 
 .app-button.ghost {
-  background: rgba(232, 240, 255, 0.54);
+  background: color-mix(in srgb, var(--primary-soft) 72%, rgba(255, 255, 255, 0.34) 28%);
   color: var(--primary-strong);
-  border: 1px solid rgba(37, 99, 235, 0.16);
-  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.08);
+  border: 1px solid color-mix(in srgb, var(--primary) 24%, white 76%);
+  box-shadow: 0 8px 18px color-mix(in srgb, var(--primary-glow) 58%, rgba(15, 23, 42, 0.03) 42%);
 }
 
 .app-button.danger {
@@ -474,14 +474,14 @@ select:focus-visible {
 .app-button:hover {
   transform: translateY(-1px);
   box-shadow:
-    0 18px 32px rgba(37, 99, 235, 0.18),
+    0 18px 32px color-mix(in srgb, var(--primary-glow) 82%, rgba(15, 23, 42, 0.06) 18%),
     inset 0 1px 0 rgba(255, 255, 255, 0.3);
 }
 
 .app-button.secondary:hover,
 .app-button.ghost:hover,
 .app-button.danger:hover {
-  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.08);
+  box-shadow: 0 14px 28px color-mix(in srgb, var(--primary-glow) 48%, rgba(15, 23, 42, 0.06) 52%);
 }
 
 .app-button:disabled,

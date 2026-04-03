@@ -13,7 +13,6 @@ function ProtectedLayout() {
   const location = useLocation();
   const isEditorRoute = location.pathname.startsWith('/app/erd/');
   const isDashboardRoute = location.pathname === '/app';
-  const theme = getSeasonTheme();
 
   if (!session) {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />;
@@ -25,7 +24,6 @@ function ProtectedLayout() {
         <header className="app-topbar">
           <div className="topbar-brand">
             <strong>ERD Studio</strong>
-            <span>{theme.label}</span>
           </div>
           <nav className="topbar-actions">
             {!isDashboardRoute && (
