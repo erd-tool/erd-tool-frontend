@@ -1,11 +1,27 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AppButton, AppCard, AppInput, AppLabel, StatusPill } from '../../components/ui';
-import { createTeam, createErd, fetchErds, fetchTeams, inviteTeamMember } from '../../lib/api';
-import { formatDate, nowIso } from '../../lib/storage';
+import {
+  createErd,
+  createTeam,
+  deleteErdRequest,
+  deleteTeamRequest,
+  fetchErds,
+  fetchTeams,
+  inviteTeamMember
+} from '../../lib/api';
+import { nowIso, formatDate } from '../../lib/storage';
+import { getSeasonTheme } from '../../lib/theme';
+import type { ErdSummary } from '../../lib/types';
 import { useAppStore } from '../../state/app-store';
 
 const LOCAL_DEMO_ENABLED = import.meta.env.VITE_ENABLE_LOCAL_DEMO === 'true';
+const EMPTY_STATE_STYLE = {
+  padding: '16px',
+  borderRadius: '18px',
+  border: '1px dashed var(--border)',
+  background: 'var(--surface-soft)'
+} as const;
 
 export function DashboardPage() {
   const navigate = useNavigate();
@@ -15,14 +31,25 @@ export function DashboardPage() {
   const token = session?.token;
   const setTeams = useAppStore((state) => state.setTeams);
   const setErds = useAppStore((state) => state.setErds);
+  const logout = useAppStore((state) => state.logout);
   const createTeamLocal = useAppStore((state) => state.createTeamLocal);
   const createErdLocal = useAppStore((state) => state.createErdLocal);
+  const deleteTeamLocal = useAppStore((state) => state.deleteTeamLocal);
+  const deleteErdLocal = useAppStore((state) => state.deleteErdLocal);
+  const [teamName, setTeamName] = useState('');
+  const [personalErdTitle, setPersonalErdTitle] = useState('');
+  const [teamErdTitle, setTeamErdTitle] = useState('');
+  const [inviteEmail, setInviteEmail] = useState('');
   const [inviteToken, setInviteToken] = useState('');
   const [actionError, setActionError] = useState('');
+  const [createTeamTargetId, setCreateTeamTargetId] = useState('');
+  const [inviteTargetTeamId, setInviteTargetTeamId] = useState('');
+  const theme = getSeasonTheme();
 
   useEffect(() => {
     if (!token || token === 'local-demo-token') return;
     let cancelled = false;
+
     void Promise.all([fetchTeams(token), fetchErds(token)])
       .then(([remoteTeams, remoteErds]) => {
         if (cancelled) return;
@@ -31,235 +58,428 @@ export function DashboardPage() {
       })
       .catch(() => {
         if (!cancelled) {
-          setActionError('대시보드 데이터를 불러오지 못했습니다.');
+          setActionError('대시보드 데이터를 불러오지 못했습니다. 잠시 후 다시 새로고침해 주세요.');
         }
       });
+
     return () => {
       cancelled = true;
     };
   }, [setErds, setTeams, token]);
 
+  useEffect(() => {
+    setCreateTeamTargetId((current) => (teams.some((team) => team.id === current) ? current : teams[0]?.id ?? ''));
+    setInviteTargetTeamId((current) => (teams.some((team) => team.id === current) ? current : teams[0]?.id ?? ''));
+  }, [teams]);
+
+  function handleLogout() {
+    logout();
+    navigate('/login');
+  }
+
   async function handleCreateTeam(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const formEl = event.currentTarget;
-    const form = new FormData(event.currentTarget);
-    const name = String(form.get('teamName') ?? '새 팀').trim();
+    const name = teamName.trim() || '새 팀';
     setActionError('');
 
     if (token === 'local-demo-token' && LOCAL_DEMO_ENABLED) {
       createTeamLocal(name);
-      formEl.reset();
+      setTeamName('');
       return;
     }
 
     try {
       const remote = await createTeam(token, name);
       setTeams([remote, ...teams.filter((team) => team.id !== remote.id)]);
-      formEl.reset();
+      setTeamName('');
     } catch (error) {
       setActionError(error instanceof Error ? error.message : '팀 생성에 실패했습니다.');
     }
   }
 
-  async function handleCreateErd(event: FormEvent<HTMLFormElement>) {
+  async function handleCreatePersonalErd(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const formEl = event.currentTarget;
-    const form = new FormData(event.currentTarget);
-    const title = String(form.get('erdTitle') ?? '새 ERD').trim();
-    const teamId = String(form.get('teamId') ?? '').trim() || undefined;
+    const title = personalErdTitle.trim() || '새 개인 ERD';
     setActionError('');
 
     if (token === 'local-demo-token' && LOCAL_DEMO_ENABLED) {
-      const local = createErdLocal(title, teamId ?? null);
-      formEl.reset();
+      const local = createErdLocal(title, null);
+      setPersonalErdTitle('');
       navigate(`/app/erd/${local.id}`);
       return;
     }
 
     try {
-      const remote = await createErd(token, title, teamId);
+      const remote = await createErd(token, title);
       setErds([remote, ...erds.filter((erd) => erd.id !== remote.id)]);
-      formEl.reset();
+      setPersonalErdTitle('');
       navigate(`/app/erd/${remote.id}`);
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : 'ERD 생성에 실패했습니다.');
+      setActionError(error instanceof Error ? error.message : '개인 ERD 생성에 실패했습니다.');
+    }
+  }
+
+  async function handleCreateTeamErd(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!createTeamTargetId) return;
+    const title = teamErdTitle.trim() || '새 팀 ERD';
+    setActionError('');
+
+    if (token === 'local-demo-token' && LOCAL_DEMO_ENABLED) {
+      const local = createErdLocal(title, createTeamTargetId);
+      setTeamErdTitle('');
+      navigate(`/app/erd/${local.id}`);
+      return;
+    }
+
+    try {
+      const remote = await createErd(token, title, createTeamTargetId);
+      setErds([remote, ...erds.filter((erd) => erd.id !== remote.id)]);
+      setTeamErdTitle('');
+      navigate(`/app/erd/${remote.id}`);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : '팀 ERD 생성에 실패했습니다.');
     }
   }
 
   async function handleInvite(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const formEl = event.currentTarget;
-    const form = new FormData(event.currentTarget);
-    const teamId = String(form.get('inviteTeamId') ?? '').trim();
-    const email = String(form.get('inviteEmail') ?? '').trim();
-    if (!teamId || !email) return;
+    if (!inviteTargetTeamId || !inviteEmail.trim()) return;
     setActionError('');
 
     if (token === 'local-demo-token' && LOCAL_DEMO_ENABLED) {
       setInviteToken('로컬 데모 모드에서는 초대 토큰이 생성되지 않습니다.');
-      formEl.reset();
+      setInviteEmail('');
       return;
     }
 
     try {
-      const invitation = await inviteTeamMember(token, teamId, email);
+      const invitation = await inviteTeamMember(token, inviteTargetTeamId, inviteEmail.trim());
       setInviteToken(invitation.token);
-      formEl.reset();
+      setInviteEmail('');
     } catch (error) {
       setActionError(error instanceof Error ? error.message : '팀 초대에 실패했습니다.');
     }
   }
 
+  async function handleDeleteErd(erdId: string, title: string) {
+    if (!window.confirm(`'${title}' ERD를 삭제하시겠습니까?`)) return;
+    setActionError('');
+
+    if (token === 'local-demo-token' && LOCAL_DEMO_ENABLED) {
+      deleteErdLocal(erdId);
+      return;
+    }
+
+    try {
+      await deleteErdRequest(token, erdId);
+      setErds(erds.filter((erd) => erd.id !== erdId));
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'ERD 삭제에 실패했습니다.');
+    }
+  }
+
+  async function handleDeleteTeam(teamId: string, teamNameValue: string) {
+    if (!window.confirm(`'${teamNameValue}' 팀과 팀 소속 ERD를 삭제하시겠습니까?`)) return;
+    setActionError('');
+
+    if (token === 'local-demo-token' && LOCAL_DEMO_ENABLED) {
+      deleteTeamLocal(teamId);
+      return;
+    }
+
+    try {
+      await deleteTeamRequest(token, teamId);
+      setTeams(teams.filter((team) => team.id !== teamId));
+      setErds(erds.filter((erd) => erd.teamId !== teamId));
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : '팀 삭제에 실패했습니다.');
+    }
+  }
+
+  const personalErds = erds.filter((erd) => !erd.teamId);
+  const teamErds = erds.filter((erd) => Boolean(erd.teamId));
+  const totalCollaborators = erds.reduce((sum, item) => sum + item.collaboratorCount, 0);
+  const collaborationLabel = teams.length > 0 ? `${teams.length}개 팀 연결` : '개인 작업 모드';
+
+  const renderErdList = (items: ErdSummary[], emptyTitle: string, emptyDescription: string) => {
+    if (items.length === 0) {
+      return (
+        <div style={EMPTY_STATE_STYLE}>
+          <strong>{emptyTitle}</strong>
+          <p className="helper-text">{emptyDescription}</p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="list">
+        {items.map((erd) => (
+          <div key={erd.id} className="list-item plain">
+            <button className="list-item-link" onClick={() => navigate(`/app/erd/${erd.id}`)}>
+              <div>
+                <strong>{erd.title}</strong>
+                <span>{erd.teamName ?? erd.ownerName}</span>
+              </div>
+              <div className="list-meta">
+                <StatusPill tone={erd.teamId ? 'info' : 'neutral'}>{erd.teamId ? '팀 ERD' : '개인 ERD'}</StatusPill>
+                <small>{formatDate(erd.updatedAt)}</small>
+              </div>
+            </button>
+            <div className="list-actions">
+              <AppButton variant="danger" className="list-action-button" onClick={() => handleDeleteErd(erd.id, erd.title)}>
+                삭제
+              </AppButton>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
   return (
     <div className="page-stack">
-      <section className="dashboard-hero">
-        <div>
-          <StatusPill tone="success">협업 준비 완료</StatusPill>
-          <h2>안녕하세요, {session?.displayName ?? '사용자'}님</h2>
-          <p>개인 ERD와 팀 ERD를 한곳에서 관리하고, 바로 편집으로 이동할 수 있습니다.</p>
-          {actionError && <p className="error-text">{actionError}</p>}
-        </div>
-        <div className="hero-metrics">
-          <AppCard className="metric-card">
-            <strong>{erds.length}</strong>
-            <span>ERD</span>
-          </AppCard>
-          <AppCard className="metric-card">
-            <strong>{teams.length}</strong>
-            <span>팀</span>
-          </AppCard>
-          <AppCard className="metric-card">
-            <strong>{erds.reduce((sum, item) => sum + item.collaboratorCount, 0)}</strong>
-            <span>접속자</span>
-          </AppCard>
-        </div>
-      </section>
+      <AppCard className="dashboard-header-card">
+        <div className="dashboard-header-top">
+          <div className="dashboard-header-copy">
+            <div className="hero-badges">
+              <StatusPill tone="success">협업 준비 완료</StatusPill>
+              <StatusPill tone={teams.length > 0 ? 'info' : 'neutral'}>{collaborationLabel}</StatusPill>
+              <StatusPill tone="warning">{theme.label}</StatusPill>
+            </div>
+            <div>
+              <h2>안녕하세요, {session?.displayName ?? '사용자'}님</h2>
+              <p>좌측에서는 개인 초안을 빠르게 만들고, 우측에서는 팀 문서와 초대 흐름을 바로 이어서 관리합니다.</p>
+            </div>
+            {actionError && <p className="error-text">{actionError}</p>}
+          </div>
 
-      <div className="dashboard-grid">
-        <AppCard>
-          <div className="section-head">
-            <div>
-              <h3>빠른 생성</h3>
-              <p>팀과 ERD를 바로 만들 수 있습니다.</p>
-            </div>
-          </div>
-          <form className="stack" onSubmit={handleCreateTeam}>
-            <div>
-              <AppLabel>팀 이름</AppLabel>
-              <AppInput name="teamName" placeholder="예: 3조 협업팀" />
-            </div>
-            <AppButton type="submit">팀 생성</AppButton>
-          </form>
-
-          <form className="stack spaced" onSubmit={handleCreateErd}>
-            <div>
-              <AppLabel>ERD 이름</AppLabel>
-              <AppInput name="erdTitle" placeholder="예: 주문 시스템" />
-            </div>
-            <div>
-              <AppLabel>팀 연결</AppLabel>
-              <select name="teamId" className="app-input">
-                <option value="">개인 ERD</option>
-                {teams.map((team) => (
-                  <option key={team.id} value={team.id}>
-                    {team.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <AppButton type="submit">ERD 생성</AppButton>
-          </form>
-        </AppCard>
-
-        <AppCard>
-          <div className="section-head">
-            <div>
-              <h3>최근 ERD</h3>
-              <p>즉시 편집 가능한 문서 목록입니다.</p>
-            </div>
-          </div>
-          <div className="list">
-            {erds.map((erd) => (
-              <button key={erd.id} className="list-item" onClick={() => navigate(`/app/erd/${erd.id}`)}>
-                <div>
-                  <strong>{erd.title}</strong>
-                  <span>{erd.teamName ?? erd.ownerName}</span>
-                </div>
-                <div className="list-meta">
-                  <StatusPill tone={erd.teamId ? 'info' : 'neutral'}>{erd.teamId ? '팀' : '개인'}</StatusPill>
-                  <small>{formatDate(erd.updatedAt)}</small>
-                </div>
-              </button>
-            ))}
-          </div>
-        </AppCard>
-
-        <AppCard>
-          <div className="section-head">
-            <div>
-              <h3>팀</h3>
-              <p>팀 초대와 공동 편집의 기본 단위입니다.</p>
-            </div>
-          </div>
-          <div className="list">
-            {teams.map((team) => (
-              <div key={team.id} className="list-item plain">
-                <div>
-                  <strong>{team.name}</strong>
-                  <span>{team.role ? `${team.role} 권한` : `${team.memberCount}명 참여`}</span>
-                </div>
-                <div className="list-meta">
-                  <StatusPill tone="success">{team.invitationCount} invite</StatusPill>
-                  <small>{formatDate(team.updatedAt)}</small>
-                </div>
-              </div>
-            ))}
-          </div>
-          <form className="stack spaced" onSubmit={handleInvite}>
-            <div>
-              <AppLabel>초대할 팀</AppLabel>
-              <select name="inviteTeamId" className="app-input" required>
-                <option value="">팀 선택</option>
-                {teams.map((team) => (
-                  <option key={team.id} value={team.id}>
-                    {team.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <AppLabel>이메일</AppLabel>
-              <AppInput name="inviteEmail" type="email" placeholder="member@example.com" required />
-            </div>
-            <AppButton type="submit" variant="secondary">
-              팀원 초대
+          <div className="dashboard-header-actions">
+            <AppButton variant="secondary" onClick={() => navigate('/login')}>
+              계정 전환
             </AppButton>
-            {inviteToken && <p className="helper-text">초대 토큰: {inviteToken}</p>}
-          </form>
-        </AppCard>
+            <AppButton variant="ghost" onClick={handleLogout}>
+              로그아웃
+            </AppButton>
+          </div>
+        </div>
 
-        <AppCard>
-          <div className="section-head">
-            <div>
-              <h3>상태</h3>
-              <p>자동 저장과 협업 연결 상태를 확인합니다.</p>
-            </div>
+        <div className="dashboard-header-status">
+          <div>
+            <span>개인 ERD</span>
+            <strong>{personalErds.length}개</strong>
           </div>
-          <div className="status-grid">
-            <div>
-              <span>서버 시간</span>
-              <strong>{formatDate(nowIso())}</strong>
-            </div>
-            <div>
-              <span>자동 저장</span>
-              <strong>활성</strong>
-            </div>
-            <div>
-              <span>협업</span>
-              <strong>Yjs hook ready</strong>
-            </div>
+          <div>
+            <span>팀 ERD</span>
+            <strong>{teamErds.length}개</strong>
           </div>
-        </AppCard>
+          <div>
+            <span>연결 팀</span>
+            <strong>{teams.length}개</strong>
+          </div>
+          <div>
+            <span>접속자 합계</span>
+            <strong>{totalCollaborators}명</strong>
+          </div>
+          <div>
+            <span>상태</span>
+            <strong>자동 저장 활성</strong>
+          </div>
+          <div>
+            <span>기준 시각</span>
+            <strong>{formatDate(nowIso())}</strong>
+          </div>
+        </div>
+      </AppCard>
+
+      <div className="dashboard-board">
+        <section className="dashboard-column">
+          <AppCard className="dashboard-card">
+            <div className="section-head compact">
+              <div>
+                <h3>개인 ERD</h3>
+                <p>아이디어 초안과 실험용 모델을 먼저 가볍게 정리합니다.</p>
+              </div>
+            </div>
+
+            <form className="dashboard-create-stack" onSubmit={handleCreatePersonalErd}>
+              <div>
+                <AppLabel htmlFor="personal-erd-title">개인용 제목</AppLabel>
+                <AppInput
+                  id="personal-erd-title"
+                  name="erdTitle"
+                  placeholder="예: 주문 시스템 개인안"
+                  value={personalErdTitle}
+                  onChange={(event) => setPersonalErdTitle(event.target.value)}
+                />
+              </div>
+              <p className="helper-text">팀 문서로 확장하기 전에 개인 초안을 빠르게 열어 두기 좋습니다.</p>
+              <AppButton type="submit" variant="secondary">
+                개인 ERD 생성
+              </AppButton>
+            </form>
+          </AppCard>
+
+          <AppCard className="dashboard-card">
+            <div className="section-head compact">
+              <div>
+                <h3>개인 ERD 목록</h3>
+                <p>혼자 작업 중인 문서만 별도로 모아 빠르게 확인합니다.</p>
+              </div>
+            </div>
+            {renderErdList(personalErds, '아직 개인 ERD가 없습니다.', '개인 ERD 생성 버튼으로 첫 초안을 시작해 보세요.')}
+          </AppCard>
+        </section>
+
+        <section className="dashboard-column">
+          <AppCard className="dashboard-card">
+            <div className="section-head compact">
+              <div>
+                <h3>팀 작업</h3>
+                <p>팀 생성, 팀 선택, 협업 ERD 생성, 멤버 초대를 한 흐름으로 묶었습니다.</p>
+              </div>
+            </div>
+
+            <div className="dashboard-team-stack">
+              <form className="dashboard-create-stack" onSubmit={handleCreateTeam}>
+                <div>
+                  <AppLabel htmlFor="team-name-create">새 팀 이름</AppLabel>
+                  <AppInput
+                    id="team-name-create"
+                    name="teamName"
+                    placeholder="예: 3조 협업팀"
+                    value={teamName}
+                    onChange={(event) => setTeamName(event.target.value)}
+                  />
+                </div>
+                <AppButton type="submit">팀 생성</AppButton>
+              </form>
+
+              <div className="dashboard-choice-panel">
+                <div className="section-head compact">
+                  <div>
+                    <h3>연결된 팀</h3>
+                    <p>드롭다운 대신 버튼으로 바로 팀을 선택합니다.</p>
+                  </div>
+                </div>
+                {teams.length > 0 ? (
+                  <div className="team-choice-grid">
+                    {teams.map((team) => (
+                      <button
+                        key={team.id}
+                        type="button"
+                        className={`team-choice-button ${createTeamTargetId === team.id ? 'active' : ''}`}
+                        onClick={() => {
+                          setCreateTeamTargetId(team.id);
+                          setInviteTargetTeamId(team.id);
+                        }}
+                      >
+                        <strong>{team.name}</strong>
+                        <span>{team.role ? `${team.role} 권한` : `${team.memberCount}명 참여`}</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="helper-text">먼저 팀을 생성하면 팀 ERD와 초대 흐름이 활성화됩니다.</p>
+                )}
+              </div>
+
+              <form className="dashboard-create-stack" onSubmit={handleCreateTeamErd}>
+                <div>
+                  <AppLabel htmlFor="team-erd-title">팀용 제목</AppLabel>
+                  <AppInput
+                    id="team-erd-title"
+                    name="teamErdTitle"
+                    placeholder="예: 주문 시스템 협업안"
+                    value={teamErdTitle}
+                    onChange={(event) => setTeamErdTitle(event.target.value)}
+                    disabled={teams.length === 0}
+                  />
+                </div>
+                <p className="helper-text">
+                  선택된 팀: <strong>{teams.find((team) => team.id === createTeamTargetId)?.name ?? '없음'}</strong>
+                </p>
+                <AppButton type="submit" disabled={teams.length === 0}>
+                  팀 ERD 생성
+                </AppButton>
+              </form>
+
+              <form className="dashboard-create-stack" onSubmit={handleInvite}>
+                <div>
+                  <AppLabel htmlFor="invite-email">초대 이메일</AppLabel>
+                  <AppInput
+                    id="invite-email"
+                    name="inviteEmail"
+                    type="email"
+                    placeholder="member@example.com"
+                    value={inviteEmail}
+                    onChange={(event) => setInviteEmail(event.target.value)}
+                    required
+                    disabled={teams.length === 0}
+                  />
+                </div>
+                <p className="helper-text">
+                  초대 대상 팀: <strong>{teams.find((team) => team.id === inviteTargetTeamId)?.name ?? '없음'}</strong>
+                </p>
+                <AppButton type="submit" variant="secondary" disabled={teams.length === 0}>
+                  팀원 초대
+                </AppButton>
+                {inviteToken && <p className="helper-text">초대 토큰: {inviteToken}</p>}
+              </form>
+            </div>
+          </AppCard>
+
+          <AppCard className="dashboard-card">
+            <div className="section-head compact">
+              <div>
+                <h3>팀 ERD 목록</h3>
+                <p>협업 중인 문서만 모아서 팀 단위 작업 흐름을 정리합니다.</p>
+              </div>
+            </div>
+            {renderErdList(teamErds, '아직 팀 ERD가 없습니다.', '팀을 선택한 뒤 팀 ERD 생성 버튼으로 첫 협업 문서를 만들어 보세요.')}
+          </AppCard>
+
+          <AppCard className="dashboard-card">
+            <div className="section-head compact">
+              <div>
+                <h3>팀 관리</h3>
+                <p>현재 연결된 팀과 권한 상태를 확인하고 필요 시 정리합니다.</p>
+              </div>
+            </div>
+            <div className="list">
+              {teams.length > 0 ? (
+                teams.map((team) => (
+                  <div key={team.id} className="list-item plain">
+                    <div>
+                      <strong>{team.name}</strong>
+                      <span>{team.role ? `${team.role} 권한` : `${team.memberCount}명 참여`}</span>
+                    </div>
+                    <div className="list-actions">
+                      <div className="list-meta">
+                        <StatusPill tone="success">{team.invitationCount} invite</StatusPill>
+                        <small>{formatDate(team.updatedAt)}</small>
+                      </div>
+                      {team.role === 'OWNER' && (
+                        <AppButton
+                          variant="danger"
+                          className="list-action-button"
+                          onClick={() => handleDeleteTeam(team.id, team.name)}
+                        >
+                          삭제
+                        </AppButton>
+                      )}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div style={EMPTY_STATE_STYLE}>
+                  <strong>생성된 팀이 없습니다.</strong>
+                  <p className="helper-text">새 팀을 만든 뒤 팀 ERD와 초대 흐름을 이어가 보세요.</p>
+                </div>
+              )}
+            </div>
+          </AppCard>
+        </section>
       </div>
     </div>
   );

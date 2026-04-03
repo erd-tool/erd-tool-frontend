@@ -1,8 +1,10 @@
+import { useEffect } from 'react';
 import { Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { AppButton } from '../components/ui';
 import { AuthPage } from '../features/auth/AuthPage';
 import { DashboardPage } from '../features/dashboard/DashboardPage';
 import { EditorPage } from '../features/editor/EditorPage';
+import { getSeasonTheme } from '../lib/theme';
 import { useAppStore } from '../state/app-store';
 
 function ProtectedLayout() {
@@ -10,6 +12,8 @@ function ProtectedLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const isEditorRoute = location.pathname.startsWith('/app/erd/');
+  const isDashboardRoute = location.pathname === '/app';
+  const theme = getSeasonTheme();
 
   if (!session) {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />;
@@ -19,14 +23,16 @@ function ProtectedLayout() {
     <div className={`app-shell ${isEditorRoute ? 'editor-shell' : ''}`}>
       {!isEditorRoute && (
         <header className="app-topbar">
-          <div>
+          <div className="topbar-brand">
             <strong>ERD Studio</strong>
-            <span>협업 ERD MVP</span>
+            <span>{theme.label}</span>
           </div>
           <nav className="topbar-actions">
-            <AppButton variant="ghost" onClick={() => navigate('/app')}>
-              대시보드
-            </AppButton>
+            {!isDashboardRoute && (
+              <AppButton variant="ghost" onClick={() => navigate('/app')}>
+                대시보드
+              </AppButton>
+            )}
           </nav>
         </header>
       )}
@@ -43,6 +49,17 @@ function PublicRedirect() {
 }
 
 export function App() {
+  const theme = getSeasonTheme();
+
+  useEffect(() => {
+    document.body.classList.remove('theme-spring', 'theme-summer', 'theme-autumn', 'theme-winter');
+    document.body.classList.add(theme.bodyClassName);
+
+    return () => {
+      document.body.classList.remove(theme.bodyClassName);
+    };
+  }, [theme.bodyClassName]);
+
   return (
     <Routes>
       <Route path="/" element={<PublicRedirect />} />

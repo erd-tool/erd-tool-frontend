@@ -1,6 +1,6 @@
 import { FormEvent, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AppButton, AppCard, AppInput, AppLabel, AppTextarea, StatusPill } from '../../components/ui';
+import { AppButton, AppCard, AppInput, AppLabel, StatusPill } from '../../components/ui';
 import { loginRequest, signupRequest } from '../../lib/api';
 import { createSampleSession } from '../../lib/dummy-data';
 import { useAppStore } from '../../state/app-store';
@@ -78,41 +78,27 @@ export function AuthPage() {
         </div>
 
         <form className="stack" onSubmit={handleSubmit}>
-          <div className="field-grid">
-            <div>
-              <AppLabel>아이디</AppLabel>
-              <AppInput name="loginId" placeholder="demo" required />
-            </div>
-            {mode === 'signup' && (
+          <div>
+            <AppLabel>아이디</AppLabel>
+            <AppInput name="loginId" placeholder="demo" required />
+          </div>
+
+          {mode === 'signup' && (
+            <div className="field-grid">
               <div>
                 <AppLabel>이름</AppLabel>
                 <AppInput name="displayName" placeholder="홍길동" required />
               </div>
-            )}
-          </div>
-
-          {mode === 'signup' && (
-            <div>
-              <AppLabel>이메일</AppLabel>
-              <AppInput name="email" type="email" placeholder="demo@example.com" required />
+              <div>
+                <AppLabel>이메일</AppLabel>
+                <AppInput name="email" type="email" placeholder="demo@example.com" required />
+              </div>
             </div>
           )}
 
           <div>
             <AppLabel>비밀번호</AppLabel>
             <AppInput name="password" type="password" placeholder="••••••••" minLength={4} required />
-          </div>
-
-          <div>
-            <AppLabel>안내</AppLabel>
-            <AppTextarea
-              readOnly
-              value={
-                LOCAL_DEMO_ENABLED
-                  ? '백엔드가 아직 연결되지 않은 경우 로컬 데모 세션으로 진입할 수 있습니다.'
-                  : '백엔드 인증이 정상 동작해야 앱에 진입할 수 있습니다.'
-              }
-            />
           </div>
 
           {error && <p className="error-text">{error}</p>}
