@@ -1189,7 +1189,7 @@ select:focus-visible {
 .field-editor {
   grid-template-columns: 1.3fr 1fr 0.8fr auto auto auto;
   align-items: center;
-  padding: 12px;
+  padding: 9px 12px;
   border-radius: 16px;
   background: var(--surface-muted);
   border: 1px solid var(--border);
@@ -1482,10 +1482,15 @@ select:focus-visible {
   gap: 10px;
 }
 
+.sidebar-action-divider {
+  height: 1px;
+  margin: 4px 0 2px;
+  background: rgba(216, 225, 236, 0.92);
+}
+
 .sidebar-mode-switch {
   display: grid;
   gap: 8px;
-  margin-bottom: 4px;
 }
 
 .sidebar-action-button {
@@ -1562,7 +1567,8 @@ select:focus-visible {
   top: 18px;
   left: 18px;
   z-index: 20;
-  width: min(1020px, calc(100% - 36px));
+  width: auto;
+  max-width: calc(100% - 36px);
 }
 
 .canvas-overlay-card {
@@ -1575,12 +1581,24 @@ select:focus-visible {
   overflow-x: hidden;
 }
 
+.entity-overlay-card {
+  width: min(980px, calc(100vw - 72px));
+}
+
+.relationship-overlay-card {
+  width: min(500px, calc(100vw - 72px));
+}
+
 .canvas-overlay-head {
   display: flex;
   justify-content: space-between;
   gap: 12px;
   align-items: start;
   margin-bottom: 14px;
+}
+
+.canvas-overlay-title-group {
+  min-width: 0;
 }
 
 .canvas-overlay-head p {
@@ -1594,6 +1612,27 @@ select:focus-visible {
   gap: 12px;
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+.entity-editor-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.entity-head-button {
+  min-height: 32px;
+  padding: 7px 10px;
+  font-size: 0.84rem;
+}
+
+.entity-comment-input {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-height: calc(1.55em * 2 + 24px);
+  line-height: 1.55;
 }
 
 .entity-color-picker {
@@ -1761,41 +1800,29 @@ select:focus-visible {
   border-color: rgba(245, 158, 11, 0.32);
 }
 
-.relationship-end-badge,
-.relationship-center-chip {
+.relationship-end-symbol {
   position: absolute;
-  pointer-events: none;
   color: var(--text);
   font-weight: 800;
 }
 
-.relationship-end-badge {
-  min-width: 28px;
-  min-height: 28px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.94);
-  border: 1px solid rgba(191, 208, 228, 0.92);
-  font-size: 0.95rem;
-  line-height: 1;
+.relationship-end-symbol {
+  overflow: visible;
+  pointer-events: none;
 }
 
-.relationship-center-chip {
-  padding: 4px 8px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.94);
-  border: 1px solid rgba(191, 208, 228, 0.92);
-  color: var(--text-soft);
-  font-size: 0.76rem;
+.relationship-end-symbol path,
+.relationship-end-symbol circle {
+  fill: none;
+  stroke: #51657d;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
-.relationship-end-badge.selected,
-.relationship-center-chip.selected {
-  border-color: rgba(217, 119, 6, 0.38);
-  box-shadow: 0 0 0 3px rgba(217, 119, 6, 0.12);
+.relationship-end-symbol.selected path,
+.relationship-end-symbol.selected circle {
+  stroke: #d97706;
 }
 
 .field-editor.compact {
@@ -1899,18 +1926,83 @@ select:focus-visible {
   min-width: 160px;
 }
 
-.relationship-center-chip {
-  pointer-events: auto;
-  cursor: grab;
-  user-select: none;
+.entity-overlay-card .field-editor.compact {
+  gap: 10px;
+}
+
+.entity-overlay-card .field-editor-head {
+  gap: 10px;
+  padding: 0 10px 2px;
+}
+
+.entity-overlay-card .field-editor.compact.mode-logical {
+  grid-template-columns: minmax(144px, 1fr) minmax(176px, 1.2fr) auto auto auto;
+}
+
+.entity-overlay-card .field-editor-head.mode-logical {
+  grid-template-columns: minmax(144px, 1fr) minmax(176px, 1.2fr) 76px 52px 64px;
+}
+
+.entity-overlay-card .field-editor.compact.mode-physical {
+  grid-template-columns:
+    minmax(116px, 0.9fr)
+    minmax(116px, 0.9fr)
+    minmax(78px, 0.6fr)
+    minmax(108px, 0.8fr)
+    minmax(144px, 1fr)
+    76px
+    52px
+    64px;
+}
+
+.entity-overlay-card .field-editor-head.mode-physical {
+  grid-template-columns:
+    minmax(116px, 0.9fr)
+    minmax(116px, 0.9fr)
+    minmax(78px, 0.6fr)
+    minmax(108px, 0.8fr)
+    minmax(144px, 1fr)
+    76px
+    52px
+    64px;
+}
+
+.entity-overlay-card .field-editor.compact.mode-both {
+  grid-template-columns:
+    minmax(108px, 0.88fr)
+    minmax(108px, 0.88fr)
+    minmax(108px, 0.88fr)
+    minmax(74px, 0.58fr)
+    minmax(104px, 0.78fr)
+    minmax(140px, 1fr)
+    76px
+    52px
+    64px;
+}
+
+.entity-overlay-card .field-editor-head.mode-both {
+  grid-template-columns:
+    minmax(108px, 0.88fr)
+    minmax(108px, 0.88fr)
+    minmax(108px, 0.88fr)
+    minmax(74px, 0.58fr)
+    minmax(104px, 0.78fr)
+    minmax(140px, 1fr)
+    76px
+    52px
+    64px;
+}
+
+.entity-overlay-card .field-editor-logical,
+.entity-overlay-card .field-editor-type,
+.entity-overlay-card .field-editor-length,
+.entity-overlay-card .field-editor-default,
+.entity-overlay-card .field-editor-comment {
+  min-width: 0;
 }
 
 .relationship-drag-path {
   cursor: grab;
-}
-
-.relationship-center-chip:active {
-  cursor: grabbing;
 }
 
 .relationship-drag-path:active {

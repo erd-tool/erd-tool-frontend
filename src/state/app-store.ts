@@ -34,6 +34,7 @@ interface AppState {
   setTeams: (teams: TeamSummary[]) => void;
   setErds: (erds: ErdSummary[]) => void;
   putDocument: (document: ErdDocument) => void;
+  markDocumentSaved: (updatedAt?: string) => void;
   ensureSeedData: () => void;
   logout: () => void;
   setActiveErd: (id: string) => void;
@@ -41,7 +42,7 @@ interface AppState {
   createErdLocal: (title: string, teamId?: string | null) => ErdSummary;
   deleteTeamLocal: (teamId: string) => void;
   deleteErdLocal: (erdId: string) => void;
-  replaceDocument: (document: ErdDocument, options?: { pushHistory?: boolean }) => void;
+  replaceDocument: (document: ErdDocument, options?: { pushHistory?: boolean; markDirty?: boolean }) => void;
   setDocumentTitle: (title: string) => void;
   setDocumentDescription: (description: string) => void;
   setDocumentVisibility: (visibility: ErdDocument['visibility']) => void;
@@ -130,6 +131,17 @@ function buildForeignKeyName(sourceEntityName: string, sourceFieldName: string, 
   return `${singularSourceName}_${sourceFieldName}_${suffix}`;
 }
 
+function reorderFieldByPrimaryKey(entity: EntityDefinition, fieldId: string) {
+  const field = entity.fields.find((item) => item.id === fieldId);
+  if (!field) return;
+
+  const remainingFields = entity.fields.filter((item) => item.id !== fieldId);
+  const primaryFields = remainingFields.filter((item) => item.primaryKey);
+  const nonPrimaryFields = remainingFields.filter((item) => !item.primaryKey);
+
+  entity.fields = [...primaryFields, field, ...nonPrimaryFields];
+}
+
 export const useAppStore = create<AppState>()(
   persist(
     (set, get) => ({
@@ -153,15 +165,33 @@ export const useAppStore = create<AppState>()(
             [document.id]: state.documents[document.id]
               ? {
                   ...state.documents[document.id],
-                  document: structuredClone(document)
+                  document: structuredClone(document),
+                  isDirty: false
                 }
               : {
                   document: structuredClone(document),
                   undoStack: [],
-                  redoStack: []
-                }
+                  redoStack: [],
+                  isDirty: false
+            }
           }
         })),
+      markDocumentSaved: (updatedAt) => {
+        const active = findActiveWorkspace(get());
+        if (!active?.workspace) return;
+        set((state) => ({
+          documents: {
+            ...state.documents,
+            [active.id]: {
+              ...state.documents[active.id],
+              isDirty: false
+            }
+          },
+          erds: updatedAt
+            ? state.erds.map((erd) => (erd.id === active.id ? { ...erd, updatedAt } : erd))
+            : state.erds
+        }));
+      },
       ensureSeedData: () => {
         const state = get();
         if (state.teams.length > 0 && state.erds.length > 0) return;
@@ -259,7 +289,8 @@ export const useAppStore = create<AppState>()(
                 [document.id]: {
                   document: structuredClone(document),
                   undoStack: [],
-                  redoStack: []
+                  redoStack: [],
+                  isDirty: options?.markDirty ?? true
                 }
               }
             };
@@ -270,7 +301,8 @@ export const useAppStore = create<AppState>()(
               options?.pushHistory === false
                 ? current.undoStack
                 : [...current.undoStack, structuredClone(current.document)].slice(-50),
-            redoStack: options?.pushHistory === false ? current.redoStack : []
+            redoStack: options?.pushHistory === false ? current.redoStack : [],
+            isDirty: options?.markDirty ?? true
           };
           return {
             documents: {
@@ -297,7 +329,7 @@ export const useAppStore = create<AppState>()(
           },
           erds: state.erds.map((erd) => (erd.id === active.id ? { ...erd, title, updatedAt: next.updatedAt } : erd))
         }));
-        get().replaceDocument(next, { pushHistory: false });
+        get().replaceDocument(next, { pushHistory: false, markDirty: true });
       },
       setDocumentDescription: (description) => {
         const active = findActiveWorkspace(get());
@@ -312,7 +344,7 @@ export const useAppStore = create<AppState>()(
             [active.id]: pushHistory(active.workspace)
           }
         }));
-        get().replaceDocument(next, { pushHistory: false });
+        get().replaceDocument(next, { pushHistory: false, markDirty: true });
       },
       setDocumentVisibility: (visibility) => {
         const active = findActiveWorkspace(get());
@@ -327,7 +359,7 @@ export const useAppStore = create<AppState>()(
             [active.id]: pushHistory(active.workspace)
           }
         }));
-        get().replaceDocument(next, { pushHistory: false });
+        get().replaceDocument(next, { pushHistory: false, markDirty: true });
       },
       setSelectedEntityId: (id) => set({ selectedEntityId: id, selectedRelationshipId: null, selectedNoteId: null }),
       setSelectedRelationshipId: (id) => set({ selectedRelationshipId: id, selectedEntityId: null, selectedNoteId: null }),
@@ -345,7 +377,7 @@ export const useAppStore = create<AppState>()(
             [active.id]: pushHistory(active.workspace)
           }
         }));
-        get().replaceDocument(next, { pushHistory: false });
+        get().replaceDocument(next, { pushHistory: false, markDirty: true });
       },
       updateEntity: (entityId, patch) => {
         const active = findActiveWorkspace(get());
@@ -398,21 +430,11 @@ export const useAppStore = create<AppState>()(
         const field = entity?.fields.find((item) => item.id === fieldId);
         if (!field) return;
         Object.assign(field, patch);
+        if (field.primaryKey) {
+          field.nullable = false;
+        }
         if (patch.primaryKey !== undefined && entity) {
-          if (patch.primaryKey) {
-            field.nullable = false;
-            entity.fields = [
-              ...entity.fields.filter((item) => item.id !== field.id && item.primaryKey),
-              field,
-              ...entity.fields.filter((item) => item.id !== field.id && !item.primaryKey)
-            ];
-          } else {
-            entity.fields = [
-              ...entity.fields.filter((item) => item.id !== field.id && item.primaryKey),
-              ...entity.fields.filter((item) => item.id !== field.id && !item.primaryKey),
-              field
-            ];
-          }
+          reorderFieldByPrimaryKey(entity, field.id);
         }
         next.updatedAt = nowIso();
         next.version += 1;
@@ -450,13 +472,12 @@ export const useAppStore = create<AppState>()(
           sourceEntity?.fields[0];
         const sourceFieldName = sourceField?.name ?? 'id';
         const sourceFieldLogicalName = sourceField?.logicalName ?? sourceFieldName;
-        const foreignKeyReference = `${source.name}.${sourceFieldName}`;
-        let targetField =
-          targetEntity?.fields.find((field) => field.foreignKey === foreignKeyReference);
+        const foreignKeyReference = `${sourceEntity?.name ?? source.name}.${sourceFieldName}`;
+        let targetField: FieldDefinition | undefined;
 
-        if (!targetField && targetEntity) {
+        if (targetEntity) {
           const nextFieldName = buildForeignKeyName(
-            source.name,
+            sourceEntity?.name ?? source.name,
             sourceFieldName,
             targetEntity.fields.map((field) => field.name)
           );
@@ -468,21 +489,12 @@ export const useAppStore = create<AppState>()(
             length: sourceField?.length,
             defaultValue: sourceField?.defaultValue,
             memo: sourceField?.memo,
-            nullable: !(config?.required ?? true),
-            primaryKey: false,
+            nullable: config?.identifying ? false : !(config?.required ?? true),
+            primaryKey: config?.identifying ?? false,
             foreignKey: foreignKeyReference
           };
-          targetEntity.fields.splice(1, 0, targetField);
-        }
-
-        if (targetField) {
-          if (!targetField.logicalName) {
-            targetField.logicalName = sourceFieldLogicalName;
-          }
-          targetField.type = sourceField?.type ?? targetField.type;
-          targetField.length = sourceField?.length;
-          targetField.nullable = !(config?.required ?? true);
-          targetField.foreignKey = foreignKeyReference;
+          targetEntity.fields.push(targetField);
+          reorderFieldByPrimaryKey(targetEntity, targetField.id);
         }
         next.relationships.push({
           id: relationId,
@@ -508,11 +520,17 @@ export const useAppStore = create<AppState>()(
         const relationship = next.relationships.find((item) => item.id === relationshipId);
         if (!relationship) return;
         Object.assign(relationship, patch);
-        if (patch.required !== undefined && relationship.targetEntityId && relationship.targetFieldId) {
+        if ((patch.identifying !== undefined || patch.required !== undefined) && relationship.targetEntityId && relationship.targetFieldId) {
           const targetEntity = next.entities.find((item) => item.id === relationship.targetEntityId);
           const targetField = targetEntity?.fields.find((field) => field.id === relationship.targetFieldId);
-          if (targetField && !targetField.primaryKey) {
-            targetField.nullable = !patch.required;
+          if (targetField && targetEntity) {
+            if (patch.identifying !== undefined) {
+              targetField.primaryKey = patch.identifying;
+              targetField.nullable = patch.identifying ? false : !(relationship.required ?? true);
+              reorderFieldByPrimaryKey(targetEntity, targetField.id);
+            } else if (patch.required !== undefined && !targetField.primaryKey) {
+              targetField.nullable = !patch.required;
+            }
           }
         }
         next.updatedAt = nowIso();
@@ -533,10 +551,8 @@ export const useAppStore = create<AppState>()(
               item.targetEntityId === relationship.targetEntityId &&
               item.targetFieldId === relationship.targetFieldId
           );
-          if (targetEntity && targetField && !targetField.primaryKey) {
-            if (!isSharedTargetField) {
-              targetEntity.fields = targetEntity.fields.filter((field) => field.id !== relationship.targetFieldId);
-            }
+          if (targetEntity && targetField && !isSharedTargetField && targetField.foreignKey) {
+            targetEntity.fields = targetEntity.fields.filter((field) => field.id !== relationship.targetFieldId);
           }
         }
         next.relationships = next.relationships.filter((item) => item.id !== relationshipId);
@@ -555,7 +571,7 @@ export const useAppStore = create<AppState>()(
         relationship.curveOffset = 0;
         next.updatedAt = nowIso();
         next.version += 1;
-        get().replaceDocument(next, { pushHistory: false });
+        get().replaceDocument(next, { pushHistory: false, markDirty: true });
       },
       addNote: () => {
         const active = findActiveWorkspace(get());
@@ -601,7 +617,8 @@ export const useAppStore = create<AppState>()(
             [active.id]: {
               document: structuredClone(previous),
               undoStack: remaining,
-              redoStack: [...active.workspace.redoStack, structuredClone(active.workspace.document)].slice(-50)
+              redoStack: [...active.workspace.redoStack, structuredClone(active.workspace.document)].slice(-50),
+              isDirty: true
             }
           }
         }));
@@ -617,7 +634,8 @@ export const useAppStore = create<AppState>()(
             [active.id]: {
               document: structuredClone(nextDocument),
               undoStack: [...active.workspace.undoStack, structuredClone(active.workspace.document)].slice(-50),
-              redoStack: remaining
+              redoStack: remaining,
+              isDirty: true
             }
           }
         }));
@@ -631,7 +649,7 @@ export const useAppStore = create<AppState>()(
         entity.position = position;
         next.updatedAt = nowIso();
         next.version += 1;
-        get().replaceDocument(next, { pushHistory: false });
+        get().replaceDocument(next, { pushHistory: false, markDirty: true });
       },
       moveNote: (noteId, position) => {
         const active = findActiveWorkspace(get());
@@ -642,7 +660,7 @@ export const useAppStore = create<AppState>()(
         note.position = position;
         next.updatedAt = nowIso();
         next.version += 1;
-        get().replaceDocument(next, { pushHistory: false });
+        get().replaceDocument(next, { pushHistory: false, markDirty: true });
       },
       setCollaborationState: (status, peers) => set({ collaboratorStatus: status, collaboratorPeers: peers })
     }),

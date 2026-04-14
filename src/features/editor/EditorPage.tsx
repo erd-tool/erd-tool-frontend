@@ -31,7 +31,7 @@ import {
 import { useNavigate, useParams } from 'react-router-dom';
 import { toPng } from 'html-to-image';
 import { AppButton, AppCard, AppInput, AppLabel, AppTextarea, StatusPill } from '../../components/ui';
-import { fetchErd, saveErd } from '../../lib/api';
+import { fetchErd, fetchPublicErd, saveErd } from '../../lib/api';
 import { generateDdl } from '../../lib/ddl';
 import { isServerErdId } from '../../lib/erd-id';
 import { downloadText, formatDate, nowIso } from '../../lib/storage';
@@ -176,13 +176,21 @@ function CanvasSelectionCard({
   return (
     <div className="canvas-inspector" style={{ left: position.x, top: position.y, right: 'auto' }}>
       {selectedEntity ? (
-        <AppCard className="canvas-overlay-card">
+        <AppCard className="canvas-overlay-card entity-overlay-card">
           <div className="canvas-overlay-head draggable-overlay-handle" onPointerDown={onDragStart('inspector')}>
-            <div>
+            <div className="canvas-overlay-title-group">
               <strong>엔티티 편집</strong>
               <p>{getEntityLabel(selectedEntity, viewMode)}</p>
             </div>
             <div className="entity-editor-head-tools">
+              <div className="entity-editor-head-actions" onPointerDown={(event) => event.stopPropagation()}>
+                <AppButton variant="secondary" className="compact-button entity-head-button" onClick={() => addField(selectedEntity.id)}>
+                  필드 추가
+                </AppButton>
+                <AppButton variant="ghost" className="compact-button entity-head-button" onClick={() => removeEntity(selectedEntity.id)}>
+                  엔티티 삭제
+                </AppButton>
+              </div>
               <div className="entity-color-picker" onPointerDown={(event) => event.stopPropagation()}>
                 {ENTITY_COLOR_OPTIONS.map((color) => (
                   <button
@@ -216,11 +224,12 @@ function CanvasSelectionCard({
             ) : null}
             <div>
               <AppLabel>엔티티 코멘트</AppLabel>
-              <AppTextarea rows={2} value={selectedEntity.memo} onChange={(event) => updateEntity(selectedEntity.id, { memo: event.target.value })} />
-            </div>
-            <div className="inline-actions">
-              <AppButton variant="secondary" onClick={() => addField(selectedEntity.id)}>필드 추가</AppButton>
-              <AppButton variant="ghost" onClick={() => removeEntity(selectedEntity.id)}>엔티티 삭제</AppButton>
+              <AppTextarea
+                className="entity-comment-input"
+                rows={2}
+                value={selectedEntity.memo}
+                onChange={(event) => updateEntity(selectedEntity.id, { memo: event.target.value })}
+              />
             </div>
             <div className={`field-editor-list compact mode-${viewMode}`}>
               <div className={`field-editor-head mode-${viewMode}`}>
@@ -301,9 +310,9 @@ function CanvasSelectionCard({
       ) : null}
 
       {selectedRelationship ? (
-        <AppCard className="canvas-overlay-card">
+        <AppCard className="canvas-overlay-card relationship-overlay-card">
           <div className="canvas-overlay-head draggable-overlay-handle" onPointerDown={onDragStart('inspector')}>
-            <div>
+            <div className="canvas-overlay-title-group">
               <strong>관계 편집</strong>
               <p>{selectedRelationship.identifying ? '식별' : '비식별'} 관계</p>
             </div>
@@ -353,6 +362,7 @@ export function EditorPage() {
   const workspace = useAppStore((state) => (erdId ? state.documents[erdId] : undefined));
   const setActiveErd = useAppStore((state) => state.setActiveErd);
   const putDocument = useAppStore((state) => state.putDocument);
+  const markDocumentSaved = useAppStore((state) => state.markDocumentSaved);
   const replaceDocument = useAppStore((state) => state.replaceDocument);
   const updateEntity = useAppStore((state) => state.updateEntity);
   const removeEntity = useAppStore((state) => state.removeEntity);
@@ -390,6 +400,9 @@ export function EditorPage() {
   const [dialect, setDialect] = useState<Dialect>('mysql');
   const [entityViewMode, setEntityViewMode] = useState<EntityViewMode>('physical');
   const [localError, setLocalError] = useState('');
+  const [loadingDocument, setLoadingDocument] = useState(isServerDocument);
+  const [documentMissing, setDocumentMissing] = useState(false);
+  const [readOnlyView, setReadOnlyView] = useState(false);
   const [relationshipDraft, setRelationshipDraft] = useState<RelationshipDraft>(INITIAL_RELATIONSHIP_DRAFT);
   const [flowInstance, setFlowInstance] = useState<ReactFlowInstance | null>(null);
   const [inspectorPosition, setInspectorPosition] = useState<OverlayPosition>({ x: 18, y: 18 });
@@ -409,21 +422,54 @@ export function EditorPage() {
   }, [erdId, setActiveErd]);
 
   useEffect(() => {
-    if (!isServerDocument || !session?.token || workspace?.document) return;
+    if (!erdId) return;
+    if (!isServerDocument) {
+      setLoadingDocument(false);
+      setDocumentMissing(false);
+      setReadOnlyView(false);
+      return;
+    }
+
     let cancelled = false;
-    void fetchErd(session.token, erdId).then((remote) => {
-      if (cancelled || !remote) return;
+    setLoadingDocument(true);
+    setDocumentMissing(false);
+
+    void (async () => {
+      let remote = null;
+      let nextReadOnly = true;
+
+      if (session?.token) {
+        remote = await fetchErd(session.token, erdId);
+        nextReadOnly = !remote;
+      }
+
+      if (!remote) {
+        remote = await fetchPublicErd(erdId);
+        nextReadOnly = true;
+      }
+
+      if (cancelled) return;
+
+      if (!remote) {
+        setDocumentMissing(true);
+        setLoadingDocument(false);
+        return;
+      }
+
       lastAutoSaveSignature.current = getAutoSaveSignature(remote);
       setLastSavedAt(remote.updatedAt);
+      setReadOnlyView(nextReadOnly);
+      setLoadingDocument(false);
       putDocument(remote);
-    });
+    })();
+
     return () => {
       cancelled = true;
     };
-  }, [erdId, isServerDocument, putDocument, session?.token, workspace?.document]);
+  }, [erdId, isServerDocument, putDocument, session?.token]);
 
   useEffect(() => {
-    if (!isServerDocument || !workspace?.document || !session || !erdId) return;
+    if (!isServerDocument || readOnlyView || !workspace?.document || !workspace.isDirty || !session || !erdId) return;
     let cancelled = false;
     const timer = window.setTimeout(async () => {
       const signature = getAutoSaveSignature(workspace.document);
@@ -436,18 +482,16 @@ export function EditorPage() {
         const remote = await saveErd(session.token, next);
         if (cancelled) return;
         setLastSavedAt(next.updatedAt);
-        if (remote) {
+        if (remote && getAutoSaveSignature(remote) !== signature) {
           lastAutoSaveSignature.current = getAutoSaveSignature(remote);
-          replaceDocument(remote, { pushHistory: false });
+          replaceDocument(remote, { pushHistory: false, markDirty: false });
         } else {
           lastAutoSaveSignature.current = signature;
-          replaceDocument(next, { pushHistory: false });
+          markDocumentSaved(next.updatedAt);
         }
       } catch {
         if (cancelled) return;
-        setLastSavedAt(next.updatedAt);
-        lastAutoSaveSignature.current = signature;
-        replaceDocument(next, { pushHistory: false });
+        setLastSavedAt('');
       } finally {
         if (!cancelled) setSaving(false);
       }
@@ -456,19 +500,23 @@ export function EditorPage() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [erdId, isServerDocument, replaceDocument, session, workspace?.document]);
+  }, [erdId, isServerDocument, readOnlyView, markDocumentSaved, replaceDocument, session, workspace?.document, workspace?.isDirty]);
 
-  const collaboration = useYjsCollaboration(erdId, workspace?.document, session, (next) => {
-    replaceDocument(next, { pushHistory: false });
+  const collaboration = useYjsCollaboration(erdId, workspace?.document, readOnlyView ? null : session, (next) => {
+    replaceDocument(next, { pushHistory: false, markDirty: false });
   });
 
   useEffect(() => {
+    if (readOnlyView) {
+      setCollaborationState('읽기 전용', 1);
+      return;
+    }
     if (!isServerDocument || session?.token === 'local-demo-token') {
       setCollaborationState('local', 1);
       return;
     }
     setCollaborationState(collaboration.status, collaboration.peers);
-  }, [collaboration.peers, collaboration.status, isServerDocument, session?.token, setCollaborationState]);
+  }, [collaboration.peers, collaboration.status, isServerDocument, readOnlyView, session?.token, setCollaborationState]);
 
   useEffect(() => {
     if (!workspace?.document) return;
@@ -527,6 +575,7 @@ export function EditorPage() {
 
       const modifier = event.metaKey || event.ctrlKey;
       if (!modifier) return;
+      if (readOnlyView) return;
       const isTypingTarget =
         target instanceof HTMLInputElement ||
         target instanceof HTMLTextAreaElement ||
@@ -564,6 +613,7 @@ export function EditorPage() {
     titleEditing,
     undo,
     workspace?.document?.title,
+    readOnlyView,
     setSelectedEntityId,
     setSelectedNoteId,
     setSelectedRelationshipId
@@ -612,7 +662,7 @@ export function EditorPage() {
     };
   }
 
-  if (!erdId || !workspace) {
+  if (!erdId) {
     return (
       <AppCard>
         <h2>ERD를 찾을 수 없습니다.</h2>
@@ -621,10 +671,33 @@ export function EditorPage() {
     );
   }
 
+  if (loadingDocument && !workspace) {
+    return (
+      <AppCard>
+        <h2>ERD를 불러오는 중입니다.</h2>
+        <p>잠시만 기다려주세요.</p>
+      </AppCard>
+    );
+  }
+
+  if (documentMissing || !workspace) {
+    return (
+      <AppCard>
+        <h2>ERD를 찾을 수 없습니다.</h2>
+        <p>문서가 공개 상태가 아니거나 접근 가능한 ERD가 아닙니다.</p>
+      </AppCard>
+    );
+  }
+
   const document = workspace.document;
   const selectedEntity = document.entities.find((entity) => entity.id === selectedEntityId) ?? null;
   const selectedRelationship = document.relationships.find((relationship) => relationship.id === selectedRelationshipId) ?? null;
-  const sqlPreview = generateDdl(document, dialect);
+  let sqlPreview = `-- ${document.title} | ${dialect.toUpperCase()}`;
+  try {
+    sqlPreview = generateDdl(document, dialect);
+  } catch (error) {
+    console.error('SQL preview generation failed.', error);
+  }
   const relationshipGroups = new Map<string, string[]>();
 
   document.relationships.forEach((relationship) => {
@@ -680,6 +753,7 @@ export function EditorPage() {
   }
 
   function openSettingsModal() {
+    if (readOnlyView) return;
     setSettingsDraft({
       title: document.title,
       description: document.description,
@@ -689,6 +763,10 @@ export function EditorPage() {
   }
 
   function saveInlineTitle() {
+    if (readOnlyView) {
+      setTitleEditing(false);
+      return;
+    }
     const trimmed = titleDraft.trim();
     if (trimmed && trimmed !== document.title) {
       setDocumentTitle(trimmed);
@@ -699,6 +777,10 @@ export function EditorPage() {
   }
 
   function saveSettings() {
+    if (readOnlyView) {
+      setSettingsOpen(false);
+      return;
+    }
     const nextTitle = settingsDraft.title.trim() || document.title;
     if (nextTitle !== document.title) setDocumentTitle(nextTitle);
     if (settingsDraft.description !== document.description) setDocumentDescription(settingsDraft.description);
@@ -707,6 +789,7 @@ export function EditorPage() {
   }
 
   function handleStartRelationshipMode() {
+    if (readOnlyView) return;
     setSelectedEntityId(null);
     setSelectedRelationshipId(null);
     setSelectedNoteId(null);
@@ -715,6 +798,7 @@ export function EditorPage() {
   }
 
   function handleNodeSelection(nodeId: string) {
+    if (readOnlyView) return;
     if (!relationshipDraft.active) {
       setSelectedEntityId(nodeId);
       return;
@@ -743,6 +827,7 @@ export function EditorPage() {
   }
 
   function handleConfirmRelationship() {
+    if (readOnlyView) return;
     if (!relationshipDraft.sourceEntityId || !relationshipDraft.targetEntityId) {
       setLocalError('부모 엔티티와 자식 엔티티를 먼저 선택하세요.');
       return;
@@ -834,22 +919,30 @@ export function EditorPage() {
                   }}
                 />
               ) : (
-                <button className="editor-title-button" onClick={() => setTitleEditing(true)}>
+                <button className="editor-title-button" onClick={() => setTitleEditing(true)} disabled={readOnlyView}>
                   <span>{document.title}</span>
-                  <PencilLine size={14} />
+                  {!readOnlyView ? <PencilLine size={14} /> : null}
                 </button>
               )}
-              <AppButton variant="secondary" className="compact-button" onClick={openSettingsModal}>
-                <Settings2 size={14} /> ERD 설정
-              </AppButton>
+              {!readOnlyView ? (
+                <AppButton variant="secondary" className="compact-button" onClick={openSettingsModal}>
+                  <Settings2 size={14} /> ERD 설정
+                </AppButton>
+              ) : (
+                <StatusPill tone="info">읽기 전용</StatusPill>
+              )}
             </div>
             <div className="editor-inline-actions">
-              <AppButton variant="ghost" className="compact-button" onClick={undo}>
-                <Undo2 size={14} /> 실행취소
-              </AppButton>
-              <AppButton variant="ghost" className="compact-button" onClick={redo}>
-                <Redo2 size={14} /> 복구
-              </AppButton>
+              {!readOnlyView ? (
+                <>
+                  <AppButton variant="ghost" className="compact-button" onClick={undo}>
+                    <Undo2 size={14} /> 실행취소
+                  </AppButton>
+                  <AppButton variant="ghost" className="compact-button" onClick={redo}>
+                    <Redo2 size={14} /> 복구
+                  </AppButton>
+                </>
+              ) : null}
               {relationshipDraft.active ? <StatusPill tone="warning">관계 설정 모드</StatusPill> : null}
               <StatusPill tone="info">{document.visibility === 'public' ? '공개 ERD' : '비공개 ERD'}</StatusPill>
             </div>
@@ -858,23 +951,19 @@ export function EditorPage() {
 
         <div className="editor-header-right">
           <div className="editor-header-metrics">
-            <AppButton variant="ghost" className="compact-button" onClick={() => navigate('/app')}>
-              <ArrowLeft size={14} /> 대시보드
+            <AppButton variant="ghost" className="compact-button" onClick={() => navigate(session ? '/app' : '/login')}>
+              <ArrowLeft size={14} /> {session ? '대시보드' : '로그인'}
             </AppButton>
             <div className="presence-chip">
               <Users size={14} />
-              <span>{collaboration.peers}명 접속</span>
+              <span>{readOnlyView ? '공개 보기' : `${collaboration.peers}명 접속`}</span>
               <div className="presence-tooltip">
-                <strong>현재 접속 인원</strong>
-                {collaboration.peerNames.map((name) => (
+                <strong>{readOnlyView ? '현재 상태' : '현재 접속 인원'}</strong>
+                {(readOnlyView ? ['읽기 전용 공개 보기'] : collaboration.peerNames).map((name) => (
                   <span key={name}>{name}</span>
                 ))}
               </div>
             </div>
-            <StatusPill tone={saving ? 'warning' : 'success'}>
-              {saving ? '저장 중' : lastSavedAt ? `저장 ${formatDate(lastSavedAt)}` : '자동 저장'}
-            </StatusPill>
-            <StatusPill tone={collaboration.isConnected ? 'success' : 'warning'}>{collaboratorStatus}</StatusPill>
           </div>
           <div className="editor-header-exports">
             <AppButton variant="secondary" className="compact-button" onClick={handleExportPng}>
@@ -891,6 +980,13 @@ export function EditorPage() {
         <aside className="editor-left-sidebar">
           <AppCard className="editor-sidebar-card compact">
             <div className="sidebar-action-stack">
+              <AppButton className="sidebar-action-button" onClick={addEntity} disabled={readOnlyView}>
+                <Plus size={16} /> 엔티티 생성
+              </AppButton>
+              <AppButton variant="secondary" className="sidebar-action-button" onClick={handleStartRelationshipMode} disabled={readOnlyView}>
+                <Link2 size={16} /> {relationshipDraft.active ? '관계 설정 종료' : '관계 설정'}
+              </AppButton>
+              <div className="sidebar-action-divider" />
               <div className="sidebar-mode-switch">
                 {ENTITY_VIEW_OPTIONS.map((option) => (
                   <AppButton
@@ -903,17 +999,15 @@ export function EditorPage() {
                   </AppButton>
                 ))}
               </div>
-              <AppButton className="sidebar-action-button" onClick={addEntity}>
-                <Plus size={16} /> 엔티티 생성
-              </AppButton>
-              <AppButton variant="secondary" className="sidebar-action-button" onClick={handleStartRelationshipMode}>
-                <Link2 size={16} /> {relationshipDraft.active ? '관계 설정 종료' : '관계 설정'}
-              </AppButton>
             </div>
 
             <div className="sidebar-guide">
-              <strong>관계 설정 안내</strong>
-              <p>부모 엔티티를 클릭한 뒤 자식 엔티티를 클릭하면 옵션 팝업이 열립니다.</p>
+              <strong>{readOnlyView ? '공개 보기 안내' : '관계 설정 안내'}</strong>
+              <p>
+                {readOnlyView
+                  ? '공개 문서는 로그인 없이 열 수 있지만 수정과 협업 연결은 할 수 없습니다.'
+                  : '부모 엔티티를 클릭한 뒤 자식 엔티티를 클릭하면 옵션 팝업이 열립니다.'}
+              </p>
             </div>
           </AppCard>
         </aside>
@@ -928,7 +1022,10 @@ export function EditorPage() {
                 edgeTypes={edgeTypes}
                 fitView
                 onInit={setFlowInstance}
-                onNodesChange={(changes) => {
+                nodesDraggable={!readOnlyView}
+                nodesConnectable={!readOnlyView}
+                elementsSelectable={!readOnlyView}
+                onNodesChange={readOnlyView ? undefined : (changes) => {
                   changes.forEach((change) => {
                     if (change.type === 'position' && change.position && change.id) {
                       useAppStore.getState().moveEntity(change.id, change.position);
@@ -938,7 +1035,7 @@ export function EditorPage() {
                     }
                   });
                 }}
-                onEdgesChange={(changes) => {
+                onEdgesChange={readOnlyView ? undefined : (changes) => {
                   changes.forEach((change) => {
                     if (change.type === 'remove' && change.id) {
                       removeRelationship(change.id);
@@ -947,6 +1044,9 @@ export function EditorPage() {
                 }}
                 onNodeClick={(_, node) => handleNodeSelection(node.id)}
                 onEdgeClick={(_, edge) => {
+                  if (readOnlyView) {
+                    return;
+                  }
                   if (window.performance.now() < suppressRelationshipSelectionUntilRef.current) {
                     return;
                   }
@@ -976,7 +1076,7 @@ export function EditorPage() {
 
               {localError ? <div className="canvas-toast error">{localError}</div> : null}
 
-              {relationshipDraft.popupPosition ? (
+              {relationshipDraft.popupPosition && !readOnlyView ? (
                 <div className="relationship-popup" style={{ left: relationshipPopupPosition.x, top: relationshipPopupPosition.y }}>
                   <div className="relationship-popup-head draggable-overlay-handle" onPointerDown={handleOverlayDragStart('relationship')}>
                     <strong>관계 옵션</strong>
@@ -1086,20 +1186,22 @@ export function EditorPage() {
                 </div>
               ) : null}
 
-              <CanvasSelectionCard
-                selectedEntity={selectedEntity}
-                selectedRelationship={selectedRelationship}
-                viewMode={entityViewMode}
-                position={inspectorPosition}
-                onDragStart={handleOverlayDragStart}
-                updateEntity={updateEntity}
-                removeEntity={removeEntity}
-                addField={addField}
-                updateField={updateField}
-                removeField={removeField}
-                updateRelationship={updateRelationship}
-                removeRelationship={removeRelationship}
-              />
+              {!readOnlyView ? (
+                <CanvasSelectionCard
+                  selectedEntity={selectedEntity}
+                  selectedRelationship={selectedRelationship}
+                  viewMode={entityViewMode}
+                  position={inspectorPosition}
+                  onDragStart={handleOverlayDragStart}
+                  updateEntity={updateEntity}
+                  removeEntity={removeEntity}
+                  addField={addField}
+                  updateField={updateField}
+                  removeField={removeField}
+                  updateRelationship={updateRelationship}
+                  removeRelationship={removeRelationship}
+                />
+              ) : null}
             </div>
           </ReactFlowProvider>
         </section>

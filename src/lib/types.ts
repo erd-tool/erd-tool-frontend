@@ -114,4 +114,5 @@ export interface DocumentWorkspace {
   undoStack: ErdDocument[];
   redoStack: ErdDocument[];
   lastSavedAt?: string;
+  isDirty?: boolean;
 }

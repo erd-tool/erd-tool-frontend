@@ -11,7 +11,6 @@ function ProtectedLayout() {
   const session = useAppStore((state) => state.session);
   const navigate = useNavigate();
   const location = useLocation();
-  const isEditorRoute = location.pathname.startsWith('/app/erd/');
   const isDashboardRoute = location.pathname === '/app';
 
   if (!session) {
@@ -19,8 +18,8 @@ function ProtectedLayout() {
   }
 
   return (
-    <div className={`app-shell ${isEditorRoute ? 'editor-shell' : ''}`}>
-      {!isEditorRoute && (
+    <div className="app-shell">
+      {!location.pathname.startsWith('/app/erd/') && (
         <header className="app-topbar">
           <div className="topbar-brand">
             <strong>ERD Studio</strong>
@@ -34,7 +33,17 @@ function ProtectedLayout() {
           </nav>
         </header>
       )}
-      <main className={`app-content ${isEditorRoute ? 'editor-mode' : ''}`}>
+      <main className="app-content">
+        <Outlet />
+      </main>
+    </div>
+  );
+}
+
+function EditorLayout() {
+  return (
+    <div className="app-shell editor-shell">
+      <main className="app-content editor-mode">
         <Outlet />
       </main>
     </div>
@@ -64,6 +73,8 @@ export function App() {
       <Route path="/login" element={<AuthPage />} />
       <Route element={<ProtectedLayout />}>
         <Route path="/app" element={<DashboardPage />} />
+      </Route>
+      <Route element={<EditorLayout />}>
         <Route path="/app/erd/:erdId" element={<EditorPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

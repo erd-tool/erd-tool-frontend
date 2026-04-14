@@ -49,6 +49,7 @@ export function DashboardPage() {
   const [createTeamTargetId, setCreateTeamTargetId] = useState('');
   const [inviteTargetTeamId, setInviteTargetTeamId] = useState('');
   const theme = getSeasonTheme();
+  const ownerTeams = teams.filter((team) => team.role === 'OWNER');
 
   useEffect(() => {
     if (!token || token === 'local-demo-token') return;
@@ -74,8 +75,8 @@ export function DashboardPage() {
 
   useEffect(() => {
     setCreateTeamTargetId((current) => (teams.some((team) => team.id === current) ? current : teams[0]?.id ?? ''));
-    setInviteTargetTeamId((current) => (teams.some((team) => team.id === current) ? current : teams[0]?.id ?? ''));
-  }, [teams]);
+    setInviteTargetTeamId((current) => (ownerTeams.some((team) => team.id === current) ? current : ownerTeams[0]?.id ?? ''));
+  }, [ownerTeams, teams]);
 
   function handleLogout() {
     logout();
@@ -407,7 +408,9 @@ export function DashboardPage() {
                         className={`team-choice-button ${createTeamTargetId === team.id ? 'active' : ''}`}
                         onClick={() => {
                           setCreateTeamTargetId(team.id);
-                          setInviteTargetTeamId(team.id);
+                          if (team.role === 'OWNER') {
+                            setInviteTargetTeamId(team.id);
+                          }
                         }}
                       >
                         <strong>{team.name}</strong>
@@ -450,13 +453,16 @@ export function DashboardPage() {
                     value={inviteLoginId}
                     onChange={(event) => setInviteLoginId(event.target.value)}
                     required
-                    disabled={teams.length === 0}
+                    disabled={ownerTeams.length === 0}
                   />
                 </div>
                 <p className="helper-text">
-                  초대 대상 팀: <strong>{teams.find((team) => team.id === inviteTargetTeamId)?.name ?? '없음'}</strong>
+                  초대 대상 팀: <strong>{ownerTeams.find((team) => team.id === inviteTargetTeamId)?.name ?? '없음'}</strong>
                 </p>
-                <AppButton type="submit" variant="secondary" disabled={teams.length === 0}>
+                {ownerTeams.length === 0 ? (
+                  <p className="helper-text">팀원 초대는 OWNER 권한이 있는 팀에서만 가능합니다.</p>
+                ) : null}
+                <AppButton type="submit" variant="secondary" disabled={ownerTeams.length === 0}>
                   팀원 초대
                 </AppButton>
                 {inviteResult && <p className="helper-text">{inviteResult}</p>}

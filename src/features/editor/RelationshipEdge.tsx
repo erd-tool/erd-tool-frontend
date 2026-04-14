@@ -1,5 +1,5 @@
 import { BaseEdge, EdgeLabelRenderer, type Edge, type EdgeProps, useReactFlow } from '@xyflow/react';
-import { useRef, type PointerEvent as ReactPointerEvent } from 'react';
+import { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import type { RelationshipDefinition } from '../../lib/types';
 import { useAppStore } from '../../state/app-store';
 
@@ -16,10 +16,6 @@ function notifyRelationshipDragFinished(relationshipId: string) {
   );
 }
 
-function getBadgeToken(side: '1' | 'N') {
-  return side;
-}
-
 function getQuadraticPoint(
   start: { x: number; y: number },
   end: { x: number; y: number },
@@ -28,19 +24,6 @@ function getQuadraticPoint(
   return {
     x: start.x + (end.x - start.x) * t,
     y: start.y + (end.y - start.y) * t
-  };
-}
-
-function getSegmentNormal(
-  start: { x: number; y: number },
-  end: { x: number; y: number }
-) {
-  const tangentX = end.x - start.x;
-  const tangentY = end.y - start.y;
-  const length = Math.hypot(tangentX, tangentY) || 1;
-  return {
-    x: -tangentY / length,
-    y: tangentX / length
   };
 }
 
@@ -75,15 +58,64 @@ function buildOrthogonalRoute(
   };
 }
 
-function offsetFromPoint(
-  point: { x: number; y: number },
+function normalizeDirection(start: { x: number; y: number }, end: { x: number; y: number }) {
+  const deltaX = end.x - start.x;
+  const deltaY = end.y - start.y;
+  const length = Math.hypot(deltaX, deltaY) || 1;
+  return {
+    x: deltaX / length,
+    y: deltaY / length
+  };
+}
+
+function toGlobalPoint(
+  origin: { x: number; y: number },
+  direction: { x: number; y: number },
   normal: { x: number; y: number },
-  distance: number
+  point: { x: number; y: number }
 ) {
   return {
-    x: point.x + normal.x * distance,
-    y: point.y + normal.y * distance
+    x: origin.x + direction.x * point.x + normal.x * point.y,
+    y: origin.y + direction.y * point.x + normal.y * point.y
   };
+}
+
+function buildIeNotation(
+  endpoint: { x: number; y: number },
+  direction: { x: number; y: number },
+  cardinality: '1' | 'N',
+  optional: boolean
+) {
+  const normal = {
+    x: -direction.y,
+    y: direction.x
+  };
+  const lines: string[] = [];
+  const circles: Array<{ cx: number; cy: number; r: number }> = [];
+
+  if (optional) {
+    const circleCenter = toGlobalPoint(endpoint, direction, normal, { x: 8, y: 0 });
+    circles.push({ cx: circleCenter.x, cy: circleCenter.y, r: 4 });
+  }
+
+  if (cardinality === '1') {
+    const x = optional ? 18 : 10;
+    const top = toGlobalPoint(endpoint, direction, normal, { x, y: -9 });
+    const bottom = toGlobalPoint(endpoint, direction, normal, { x, y: 9 });
+    lines.push(`M ${top.x},${top.y} L ${bottom.x},${bottom.y}`);
+  } else {
+    const outerX = optional ? 14 : 6;
+    const rootX = outerX + 12;
+    const root = toGlobalPoint(endpoint, direction, normal, { x: rootX, y: 0 });
+    const outerCenter = toGlobalPoint(endpoint, direction, normal, { x: outerX, y: 0 });
+    const outerTop = toGlobalPoint(endpoint, direction, normal, { x: outerX, y: -8 });
+    const outerBottom = toGlobalPoint(endpoint, direction, normal, { x: outerX, y: 8 });
+    lines.push(`M ${root.x},${root.y} L ${outerCenter.x},${outerCenter.y}`);
+    lines.push(`M ${root.x},${root.y} L ${outerTop.x},${outerTop.y}`);
+    lines.push(`M ${root.x},${root.y} L ${outerBottom.x},${outerBottom.y}`);
+  }
+
+  return { lines, circles };
 }
 
 export function RelationshipEdge({
@@ -102,6 +134,8 @@ export function RelationshipEdge({
   const moveRelationshipControlPoint = useAppStore((state) => state.moveRelationshipControlPoint);
   const { screenToFlowPosition } = useReactFlow();
   const didDragRef = useRef(false);
+  const dragPreviewOffsetRef = useRef<{ x: number; y: number } | null>(null);
+  const [dragPreviewOffset, setDragPreviewOffset] = useState<{ x: number; y: number } | null>(null);
 
   if (!relationship) return null;
 
@@ -126,7 +160,7 @@ export function RelationshipEdge({
     x: fallbackControlPoint.x - midpoint.x,
     y: fallbackControlPoint.y - midpoint.y
   };
-  const controlOffset =
+  const persistedControlOffset =
     relationship.controlOffset ??
     (relationship.controlPoint
       ? {
@@ -134,19 +168,16 @@ export function RelationshipEdge({
           y: relationship.controlPoint.y - midpoint.y
         }
       : fallbackControlOffset);
+  const controlOffset = dragPreviewOffset ?? persistedControlOffset;
   const orthogonalRoute = buildOrthogonalRoute(source, target, midpoint, controlOffset);
   const edgePath = orthogonalRoute.path;
-  const centerPoint = orthogonalRoute.centerPoint;
-  const sourceBadgeAnchor = getQuadraticPoint(orthogonalRoute.sourceSegment[0], orthogonalRoute.sourceSegment[1], 0.5);
-  const targetBadgeAnchor = getQuadraticPoint(orthogonalRoute.targetSegment[0], orthogonalRoute.targetSegment[1], 0.5);
-  const sourceBadgeNormal = getSegmentNormal(orthogonalRoute.sourceSegment[0], orthogonalRoute.sourceSegment[1]);
-  const targetBadgeNormal = getSegmentNormal(orthogonalRoute.targetSegment[0], orthogonalRoute.targetSegment[1]);
-  const sourceBadge = offsetFromPoint(sourceBadgeAnchor, sourceBadgeNormal, 18);
-  const targetBadge = offsetFromPoint(targetBadgeAnchor, targetBadgeNormal, -18);
-
   const [sourceCardinality = '1', targetCardinality = 'N'] = relationship.cardinality.split(':') as ['1' | 'N', '1' | 'N'];
+  const sourceDirection = normalizeDirection(source, orthogonalRoute.sourceSegment[1]);
+  const targetDirection = normalizeDirection(target, orthogonalRoute.targetSegment[0]);
+  const sourceNotation = buildIeNotation(source, sourceDirection, sourceCardinality, false);
+  const targetNotation = buildIeNotation(target, targetDirection, targetCardinality, !relationship.required);
 
-  function handleControlDragStart(event: ReactPointerEvent<SVGPathElement | HTMLDivElement>) {
+  function handleControlDragStart(event: ReactPointerEvent<SVGPathElement>) {
     event.preventDefault();
     event.stopPropagation();
     didDragRef.current = false;
@@ -155,7 +186,7 @@ export function RelationshipEdge({
       x: event.clientX,
       y: event.clientY
     });
-    const initialControlOffset = controlOffset;
+    const initialControlOffset = persistedControlOffset;
 
     const handlePointerMove = (moveEvent: PointerEvent) => {
       const nextPoint = screenToFlowPosition({
@@ -167,16 +198,23 @@ export function RelationshipEdge({
         didDragRef.current = true;
       }
 
-      moveRelationshipControlPoint(relationship.id, {
+      const nextOffset = {
         x: initialControlOffset.x + (nextPoint.x - dragStart.x),
         y: initialControlOffset.y + (nextPoint.y - dragStart.y)
-      });
+      };
+      dragPreviewOffsetRef.current = nextOffset;
+      setDragPreviewOffset(nextOffset);
     };
 
     const handlePointerUp = () => {
+      if (didDragRef.current && dragPreviewOffsetRef.current) {
+        moveRelationshipControlPoint(relationship.id, dragPreviewOffsetRef.current);
+      }
       if (didDragRef.current) {
         notifyRelationshipDragFinished(relationship.id);
       }
+      dragPreviewOffsetRef.current = null;
+      setDragPreviewOffset(null);
       window.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('pointerup', handlePointerUp);
     };
@@ -185,7 +223,7 @@ export function RelationshipEdge({
     window.addEventListener('pointerup', handlePointerUp, { once: true });
   }
 
-  function handleDragClick(event: React.MouseEvent<SVGPathElement | HTMLDivElement>) {
+  function handleDragClick(event: React.MouseEvent<SVGPathElement>) {
     if (didDragRef.current) {
       event.preventDefault();
       event.stopPropagation();
@@ -220,32 +258,32 @@ export function RelationshipEdge({
         onClick={handleDragClick}
       />
       <EdgeLabelRenderer>
-        <div
-          className={`relationship-end-badge ${selected ? 'selected' : ''}`}
-          style={{
-            transform: `translate(-50%, -50%) translate(${sourceBadge.x}px, ${sourceBadge.y}px)`
-          }}
+        <svg
+          className={`relationship-end-symbol ${selected ? 'selected' : ''}`}
+          width="1"
+          height="1"
+          style={{ left: 0, top: 0 }}
         >
-          {getBadgeToken(sourceCardinality)}
-        </div>
-        <div
-          className={`relationship-center-chip ${selected ? 'selected' : ''}`}
-          style={{
-            transform: `translate(-50%, -50%) translate(${centerPoint.x}px, ${centerPoint.y}px)`
-          }}
-          onPointerDown={handleControlDragStart}
-          onClick={handleDragClick}
+          {sourceNotation.lines.map((line) => (
+            <path key={line} d={line} />
+          ))}
+          {sourceNotation.circles.map((circle, index) => (
+            <circle key={`source-circle-${index}`} cx={circle.cx} cy={circle.cy} r={circle.r} />
+          ))}
+        </svg>
+        <svg
+          className={`relationship-end-symbol ${selected ? 'selected' : ''}`}
+          width="1"
+          height="1"
+          style={{ left: 0, top: 0 }}
         >
-          {relationship.identifying ? '식별' : '비식별'}
-        </div>
-        <div
-          className={`relationship-end-badge ${selected ? 'selected' : ''}`}
-          style={{
-            transform: `translate(-50%, -50%) translate(${targetBadge.x}px, ${targetBadge.y}px)`
-          }}
-        >
-          {getBadgeToken(targetCardinality)}
-        </div>
+          {targetNotation.lines.map((line) => (
+            <path key={line} d={line} />
+          ))}
+          {targetNotation.circles.map((circle, index) => (
+            <circle key={`target-circle-${index}`} cx={circle.cx} cy={circle.cy} r={circle.r} />
+          ))}
+        </svg>
       </EdgeLabelRenderer>
     </>
   );

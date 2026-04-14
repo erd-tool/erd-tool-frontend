@@ -2,7 +2,7 @@ import { generateDdl } from './ddl';
 import { nowIso } from './storage';
 import type { Dialect, ErdDocument, ErdSummary, ErdVisibility, TeamInvitationSummary, TeamSummary, UserSession } from './types';
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080';
+const API_BASE = import.meta.env.VITE_API_BASE_URL?.trim() ?? '';
 
 const STATUS_FALLBACK_MESSAGES: Record<number, string> = {
   400: '요청 내용을 다시 확인해 주세요.',
@@ -158,6 +158,38 @@ async function requestMaybeJson<T>(path: string, init?: RequestInit): Promise<T 
   }
 }
 
+function unwrapHalResource<T>(payload: T | { _embedded?: Record<string, unknown>; _links?: unknown }) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return payload as T;
+  }
+  if ('_embedded' in payload) {
+    const embedded = payload._embedded;
+    if (embedded && typeof embedded === 'object') {
+      const firstEmbedded = Object.values(embedded)[0];
+      if (firstEmbedded && !Array.isArray(firstEmbedded)) {
+        return firstEmbedded as T;
+      }
+    }
+  }
+  return payload as T;
+}
+
+function unwrapHalCollection<T>(payload: unknown): T[] {
+  if (Array.isArray(payload)) {
+    return payload as T[];
+  }
+  if (payload && typeof payload === 'object' && '_embedded' in payload) {
+    const embedded = (payload as { _embedded?: Record<string, unknown> })._embedded;
+    if (embedded && typeof embedded === 'object') {
+      const firstEmbedded = Object.values(embedded)[0];
+      if (Array.isArray(firstEmbedded)) {
+        return firstEmbedded as T[];
+      }
+    }
+  }
+  return [];
+}
+
 function mapTeamSummary(payload: {
   id: number;
   name: string;
@@ -283,7 +315,22 @@ export async function signupRequest(payload: { loginId: string; email: string; p
 
 export async function fetchTeams(token?: string) {
   const resolvedToken = resolveToken(token);
-  const response = await requestMaybeJson<Array<{
+  const response = await requestMaybeJson<
+    Array<{
+      id: number;
+      name: string;
+      description?: string;
+      role?: string;
+      memberCount?: number;
+      invitationCount?: number;
+      updatedAt?: string;
+    }> | {
+      _embedded?: Record<string, unknown>;
+    }
+  >('/api/teams', {
+    headers: resolvedToken ? { Authorization: `Bearer ${resolvedToken}` } : {}
+  });
+  return unwrapHalCollection<{
     id: number;
     name: string;
     description?: string;
@@ -291,15 +338,28 @@ export async function fetchTeams(token?: string) {
     memberCount?: number;
     invitationCount?: number;
     updatedAt?: string;
-  }>>('/api/teams', {
-    headers: resolvedToken ? { Authorization: `Bearer ${resolvedToken}` } : {}
-  });
-  return response?.map(mapTeamSummary) ?? null;
+  }>(response)?.map(mapTeamSummary) ?? null;
 }
 
 export async function fetchTeamInvitations(token?: string) {
   const resolvedToken = resolveToken(token);
-  const response = await requestMaybeJson<Array<{
+  const response = await requestMaybeJson<
+    Array<{
+      id: number;
+      teamId: number;
+      teamName: string;
+      inviteeLoginId: string;
+      inviteeDisplayName: string;
+      status: 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED';
+      expiresAt: string;
+      createdAt: string;
+    }> | {
+      _embedded?: Record<string, unknown>;
+    }
+  >('/api/teams/invitations', {
+    headers: resolvedToken ? { Authorization: `Bearer ${resolvedToken}` } : {}
+  });
+  return unwrapHalCollection<{
     id: number;
     teamId: number;
     teamName: string;
@@ -308,15 +368,27 @@ export async function fetchTeamInvitations(token?: string) {
     status: 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED';
     expiresAt: string;
     createdAt: string;
-  }>>('/api/teams/invitations', {
-    headers: resolvedToken ? { Authorization: `Bearer ${resolvedToken}` } : {}
-  });
-  return response?.map(mapInvitationSummary) ?? null;
+  }>(response)?.map(mapInvitationSummary) ?? null;
 }
 
 export async function fetchErds(token?: string) {
   const resolvedToken = resolveToken(token);
-  const response = await requestMaybeJson<Array<{
+  const response = await requestMaybeJson<
+    Array<{
+      id: number;
+      title: string;
+      description?: string;
+      visibility?: ErdVisibility;
+      teamId?: number | null;
+      teamName?: string | null;
+      updatedAt: string;
+    }> | {
+      _embedded?: Record<string, unknown>;
+    }
+  >('/api/erds', {
+    headers: resolvedToken ? { Authorization: `Bearer ${resolvedToken}` } : {}
+  });
+  return unwrapHalCollection<{
     id: number;
     title: string;
     description?: string;
@@ -324,10 +396,7 @@ export async function fetchErds(token?: string) {
     teamId?: number | null;
     teamName?: string | null;
     updatedAt: string;
-  }>>('/api/erds', {
-    headers: resolvedToken ? { Authorization: `Bearer ${resolvedToken}` } : {}
-  });
-  return response?.map(mapErdSummary) ?? null;
+  }>(response)?.map(mapErdSummary) ?? null;
 }
 
 export async function fetchErd(token: string | undefined, id: string) {
@@ -341,7 +410,18 @@ export async function fetchErd(token: string | undefined, id: string) {
   }>(`/api/erds/${id}`, {
     headers: resolvedToken ? { Authorization: `Bearer ${resolvedToken}` } : {}
   });
-  return response ? mapDocument(response) : null;
+  return response ? mapDocument(unwrapHalResource(response)) : null;
+}
+
+export async function fetchPublicErd(id: string) {
+  const response = await requestMaybeJson<{
+    id: number;
+    title: string;
+    description?: string;
+    visibility?: ErdVisibility;
+    contentJson: string;
+  }>(`/api/public/erds/${id}`);
+  return response ? mapDocument(unwrapHalResource(response)) : null;
 }
 
 export async function saveErd(token: string | undefined, document: ErdDocument) {
@@ -370,7 +450,7 @@ export async function saveErd(token: string | undefined, document: ErdDocument) 
       })
     })
   });
-  return response ? mapDocument(response) : null;
+  return response ? mapDocument(unwrapHalResource(response)) : null;
 }
 
 export async function createErd(token: string | undefined, title: string, teamId?: string) {
@@ -388,7 +468,7 @@ export async function createErd(token: string | undefined, title: string, teamId
     headers: resolvedToken ? { Authorization: `Bearer ${resolvedToken}` } : {},
     body: JSON.stringify({ title, visibility: 'private', teamId: teamId ? Number(teamId) : null })
   });
-  return mapErdSummary(response);
+  return mapErdSummary(unwrapHalResource(response));
 }
 
 export async function createTeam(token: string | undefined, name: string) {
@@ -406,7 +486,7 @@ export async function createTeam(token: string | undefined, name: string) {
     headers: resolvedToken ? { Authorization: `Bearer ${resolvedToken}` } : {},
     body: JSON.stringify({ name })
   });
-  return mapTeamSummary(response);
+  return mapTeamSummary(unwrapHalResource(response));
 }
 
 export async function deleteErdRequest(token: string | undefined, erdId: string) {
@@ -441,7 +521,7 @@ export async function inviteTeamMember(token: string | undefined, teamId: string
     headers: resolvedToken ? { Authorization: `Bearer ${resolvedToken}` } : {},
     body: JSON.stringify({ loginId })
   });
-  return mapInvitationSummary(response);
+  return mapInvitationSummary(unwrapHalResource(response));
 }
 
 export async function acceptTeamInvitation(token: string | undefined, invitationId: string) {
@@ -458,7 +538,7 @@ export async function acceptTeamInvitation(token: string | undefined, invitation
     method: 'POST',
     headers: resolvedToken ? { Authorization: `Bearer ${resolvedToken}` } : {}
   });
-  return mapTeamSummary(response);
+  return mapTeamSummary(unwrapHalResource(response));
 }
 
 export async function rejectTeamInvitation(token: string | undefined, invitationId: string) {

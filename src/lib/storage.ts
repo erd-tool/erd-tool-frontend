@@ -20,8 +20,23 @@ export function saveJson(key: string, value: unknown) {
   localStorage.setItem(key, JSON.stringify(value));
 }
 
+function createRandomToken(length: number) {
+  const secureCrypto = globalThis.crypto;
+  if (typeof secureCrypto?.randomUUID === 'function') {
+    return secureCrypto.randomUUID().replaceAll('-', '').slice(0, length);
+  }
+
+  if (typeof secureCrypto?.getRandomValues === 'function') {
+    const bytes = new Uint8Array(Math.ceil(length / 2));
+    secureCrypto.getRandomValues(bytes);
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('').slice(0, length);
+  }
+
+  return `${Date.now().toString(16)}${Math.random().toString(16).slice(2)}`.slice(0, length);
+}
+
 export function createId(prefix: string) {
-  return `${prefix}_${crypto.randomUUID().replaceAll('-', '').slice(0, 10)}`;
+  return `${prefix}_${createRandomToken(10)}`;
 }
 
 export function nowIso() {
@@ -44,4 +59,3 @@ export function downloadText(filename: string, content: string) {
   link.click();
   URL.revokeObjectURL(url);
 }
-
