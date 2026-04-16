@@ -510,6 +510,7 @@ export function EditorPage() {
     offsetY: number;
   }>({ target: null, offsetX: 0, offsetY: 0 });
   const lastAutoSaveSignature = useRef('');
+  const dashboardLabel = session ? '대시보드' : '로그인';
 
   function clearCanvasSelection() {
     setSelectedEntityId(null);
@@ -1015,9 +1016,9 @@ export function EditorPage() {
   return (
     <div className="editor-screen">
       <header className="editor-header">
-        <div className="editor-header-left">
-          <div className="editor-title-stack">
-            <div className="editor-title-row">
+        <div className="editor-title-stack">
+          <div className="editor-title-row">
+            <div className="editor-title-main">
               {titleEditing ? (
                 <input
                   className="editor-title-input-inline"
@@ -1039,36 +1040,56 @@ export function EditorPage() {
                   {!readOnlyView ? <PencilLine size={14} /> : null}
                 </button>
               )}
+            </div>
+            <div className="editor-title-actions">
               {!readOnlyView ? (
-                <AppButton variant="secondary" className="compact-button" onClick={openSettingsModal}>
-                  <Settings2 size={14} /> ERD 설정
+                <>
+                  <AppButton
+                    variant="ghost"
+                    className={`compact-button ${isMobileLayout ? 'icon-only-button history-icon-button' : ''}`}
+                    onClick={undo}
+                    aria-label="실행취소"
+                    title="실행취소"
+                  >
+                    <Undo2 size={14} />
+                    {!isMobileLayout ? '실행취소' : null}
+                  </AppButton>
+                  <AppButton
+                    variant="ghost"
+                    className={`compact-button ${isMobileLayout ? 'icon-only-button history-icon-button' : ''}`}
+                    onClick={redo}
+                    aria-label="복구"
+                    title="복구"
+                  >
+                    <Redo2 size={14} />
+                    {!isMobileLayout ? '복구' : null}
+                  </AppButton>
+                </>
+              ) : null}
+              <AppButton
+                variant="ghost"
+                className={`compact-button ${isMobileLayout ? 'mobile-dashboard-button' : ''}`}
+                onClick={() => navigate(session ? '/app' : '/login')}
+              >
+                <ArrowLeft size={14} /> {dashboardLabel}
+              </AppButton>
+              {!readOnlyView ? (
+                <AppButton
+                  variant="secondary"
+                  className={`compact-button ${isMobileLayout ? 'icon-only-button settings-icon-button' : ''}`}
+                  onClick={openSettingsModal}
+                  aria-label="ERD 설정"
+                  title="ERD 설정"
+                >
+                  <Settings2 size={14} />
+                  {!isMobileLayout ? 'ERD 설정' : null}
                 </AppButton>
               ) : (
                 <StatusPill tone="info">읽기 전용</StatusPill>
               )}
             </div>
-            <div className="editor-inline-actions">
-              {!readOnlyView ? (
-                <>
-                  <AppButton variant="ghost" className="compact-button" onClick={undo}>
-                    <Undo2 size={14} /> 실행취소
-                  </AppButton>
-                  <AppButton variant="ghost" className="compact-button" onClick={redo}>
-                    <Redo2 size={14} /> 복구
-                  </AppButton>
-                </>
-              ) : null}
-              {relationshipDraft.active ? <StatusPill tone="warning">관계 설정 모드</StatusPill> : null}
-              <StatusPill tone="info">{document.visibility === 'public' ? '공개 ERD' : '비공개 ERD'}</StatusPill>
-            </div>
           </div>
-        </div>
-
-        <div className="editor-header-right">
-          <div className="editor-header-metrics">
-            <AppButton variant="ghost" className="compact-button" onClick={() => navigate(session ? '/app' : '/login')}>
-              <ArrowLeft size={14} /> {session ? '대시보드' : '로그인'}
-            </AppButton>
+          <div className="editor-secondary-row">
             <div className="presence-chip">
               <Users size={14} />
               <span>{readOnlyView ? '공개 보기' : `${collaboration.peers}명 접속`}</span>
@@ -1079,14 +1100,14 @@ export function EditorPage() {
                 ))}
               </div>
             </div>
-          </div>
-          <div className="editor-header-exports">
             <AppButton variant="secondary" className="compact-button" onClick={handleExportPng}>
               <Download size={14} /> PNG
             </AppButton>
             <AppButton variant="secondary" className="compact-button" onClick={() => setSqlModalOpen(true)}>
               <FileCode2 size={14} /> SQL
             </AppButton>
+            {relationshipDraft.active ? <StatusPill tone="warning">관계 설정 모드</StatusPill> : null}
+            <StatusPill tone="info">{document.visibility === 'public' ? '공개 ERD' : '비공개 ERD'}</StatusPill>
           </div>
         </div>
       </header>
@@ -1095,11 +1116,26 @@ export function EditorPage() {
         <aside className="editor-left-sidebar">
           <AppCard className="editor-sidebar-card compact">
             <div className="sidebar-action-stack">
-              <AppButton className="sidebar-action-button" onClick={addEntity} disabled={readOnlyView}>
-                <Plus size={16} /> 엔티티 생성
+              <AppButton
+                className={`sidebar-action-button ${isMobileLayout ? 'icon-only-button mobile-sidebar-icon-button' : ''}`}
+                onClick={addEntity}
+                disabled={readOnlyView}
+                aria-label="엔티티 생성"
+                title="엔티티 생성"
+              >
+                <Plus size={16} />
+                {!isMobileLayout ? '엔티티 생성' : null}
               </AppButton>
-              <AppButton variant="secondary" className="sidebar-action-button" onClick={handleStartRelationshipMode} disabled={readOnlyView}>
-                <Link2 size={16} /> {relationshipDraft.active ? '관계 설정 종료' : '관계 설정'}
+              <AppButton
+                variant="secondary"
+                className={`sidebar-action-button ${isMobileLayout ? 'icon-only-button mobile-sidebar-icon-button' : ''}`}
+                onClick={handleStartRelationshipMode}
+                disabled={readOnlyView}
+                aria-label={relationshipDraft.active ? '관계 설정 종료' : '관계 설정'}
+                title={relationshipDraft.active ? '관계 설정 종료' : '관계 설정'}
+              >
+                <Link2 size={16} />
+                {!isMobileLayout ? (relationshipDraft.active ? '관계 설정 종료' : '관계 설정') : null}
               </AppButton>
               <div className="sidebar-action-divider" />
               <div className="sidebar-mode-switch">

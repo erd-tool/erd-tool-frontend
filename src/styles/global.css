@@ -1334,7 +1334,7 @@ select:focus-visible {
 
 .editor-header {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   gap: 18px;
   align-items: stretch;
   padding: 16px 18px;
@@ -1352,6 +1352,10 @@ select:focus-visible {
   display: grid;
 }
 
+.editor-title-stack {
+  gap: 10px;
+}
+
 .editor-header-right {
   min-width: 260px;
   align-content: space-between;
@@ -1359,6 +1363,8 @@ select:focus-visible {
 }
 
 .editor-title-row,
+.editor-title-actions,
+.editor-secondary-row,
 .editor-inline-actions,
 .editor-header-metrics,
 .editor-header-exports,
@@ -1371,6 +1377,16 @@ select:focus-visible {
 
 .editor-title-row {
   min-width: 0;
+  justify-content: space-between;
+}
+
+.editor-title-main {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.editor-title-actions {
+  justify-content: flex-end;
 }
 
 .editor-title-button {
@@ -1415,6 +1431,22 @@ select:focus-visible {
   padding: 9px 12px;
   font-size: 0.92rem;
   box-shadow: none;
+}
+
+.icon-only-button {
+  min-width: 36px;
+  width: 36px;
+  padding: 0;
+}
+
+.history-icon-button,
+.settings-icon-button {
+  flex: 0 0 auto;
+}
+
+.mobile-sidebar-icon-button {
+  min-width: 40px;
+  width: 40px;
 }
 
 .presence-chip {
@@ -2076,7 +2108,6 @@ select:focus-visible {
 }
 
 @media (max-width: 1120px) {
-  .editor-header,
   .editor-layout-shell {
     grid-template-columns: 1fr;
   }
@@ -2096,16 +2127,18 @@ select:focus-visible {
 
 @media (max-width: 860px) {
   .editor-screen {
-    padding: 10px;
-    gap: 10px;
+    padding: 8px;
+    gap: 8px;
   }
 
   .editor-title-row,
+  .editor-title-actions,
+  .editor-secondary-row,
   .editor-inline-actions,
   .editor-header-metrics,
   .editor-header-exports {
     align-items: stretch;
-    gap: 8px;
+    gap: 6px;
   }
 
   .editor-title-button,
@@ -2115,85 +2148,106 @@ select:focus-visible {
   }
 
   .editor-header {
-    padding: 12px 13px;
-    gap: 12px;
+    padding: 10px 12px;
+    gap: 8px;
+    border-radius: 20px;
   }
 
-  .editor-header-right {
-    gap: 8px;
-    min-width: 0;
-    align-content: start;
+  .editor-title-stack {
+    gap: 6px;
   }
 
   .editor-title-button,
   .editor-title-input-inline {
-    font-size: clamp(1.16rem, 4.8vw, 1.4rem);
+    font-size: clamp(1.05rem, 4.4vw, 1.22rem);
   }
 
   .compact-button {
-    min-height: 34px;
-    padding: 8px 10px;
-    font-size: 0.84rem;
+    min-height: 32px;
+    padding: 7px 10px;
+    font-size: 0.8rem;
+  }
+
+  .icon-only-button {
+    min-width: 32px;
+    width: 32px;
+  }
+
+  .editor-title-row {
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .editor-title-actions {
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+  }
+
+  .mobile-dashboard-button {
+    min-width: auto;
+    padding-inline: 10px;
+  }
+
+  .editor-secondary-row {
+    flex-wrap: wrap;
+    align-items: center;
   }
 
   .app-input {
-    padding: 10px 12px;
-    font-size: 0.95rem;
+    padding: 9px 11px;
+    font-size: 0.92rem;
   }
 
   .editor-layout-shell {
-    gap: 10px;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 8px;
   }
 
   .editor-left-sidebar {
     max-height: none;
+    overflow-x: auto;
   }
 
   .editor-sidebar-card.compact {
-    padding: 12px;
-    border-radius: 20px;
+    padding: 8px;
+    border-radius: 18px;
   }
 
   .sidebar-action-stack {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
     gap: 8px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .sidebar-action-stack::-webkit-scrollbar {
+    display: none;
   }
 
   .sidebar-action-button {
-    min-width: 0;
-    width: 100%;
+    min-width: max-content;
+    width: auto;
+    white-space: nowrap;
+  }
+
+  .sidebar-mode-switch {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 8px;
   }
 
   .sidebar-action-divider,
   .sidebar-guide {
-    grid-column: 1 / -1;
-  }
-
-  .sidebar-mode-switch {
-    grid-column: 1 / -1;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 8px;
-  }
-
-  .sidebar-guide {
-    margin-top: 12px;
-    padding-top: 12px;
-  }
-
-  .sidebar-guide p {
-    font-size: 0.88rem;
-    line-height: 1.5;
-  }
-
-  .editor-inline-actions .compact-button,
-  .editor-header-metrics .compact-button,
-  .editor-header-exports .compact-button {
-    flex: 1 1 calc(50% - 4px);
-    width: auto;
+    display: none;
   }
 
   .presence-chip {
-    flex: 1 1 180px;
+    padding: 7px 10px;
+    font-size: 0.82rem;
     min-width: 0;
   }
 
@@ -2205,6 +2259,7 @@ select:focus-visible {
 
   .canvas-mobile-sheet {
     padding: 8px;
+    pointer-events: auto;
   }
 
   .entity-overlay-card.mobile-bottom-sheet {
@@ -2247,6 +2302,10 @@ select:focus-visible {
 
   .entity-editor-head-actions .entity-head-button {
     flex: 1 1 calc(50% - 4px);
+  }
+
+  .editor-canvas-region {
+    min-height: 0;
   }
 
   .relationship-popup {
