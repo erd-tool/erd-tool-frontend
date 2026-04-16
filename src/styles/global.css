@@ -1571,9 +1571,20 @@ select:focus-visible {
   max-width: calc(100% - 36px);
 }
 
+.canvas-mobile-sheet {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 24;
+  padding: 12px;
+  pointer-events: none;
+}
+
 .canvas-overlay-card {
   padding: 16px;
   border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.88);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(245, 248, 255, 0.92)),
     linear-gradient(135deg, rgba(37, 99, 235, 0.04), rgba(245, 158, 11, 0.05));
@@ -1583,6 +1594,13 @@ select:focus-visible {
 
 .entity-overlay-card {
   width: min(980px, calc(100vw - 72px));
+  border-color: var(--entity-overlay-border, rgba(255, 255, 255, 0.88));
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(255, 255, 255, 0.74)),
+    linear-gradient(135deg, var(--entity-overlay-surface-start, rgba(37, 99, 235, 0.06)), var(--entity-overlay-surface-end, rgba(245, 158, 11, 0.05)));
+  box-shadow:
+    0 20px 40px var(--entity-overlay-shadow, rgba(15, 23, 42, 0.12)),
+    inset 0 1px 0 rgba(255, 255, 255, 0.72);
 }
 
 .relationship-overlay-card {
@@ -1606,6 +1624,32 @@ select:focus-visible {
   color: var(--text-soft);
 }
 
+.entity-overlay-head {
+  margin: -16px -16px 0;
+  padding: 16px;
+  border-radius: 22px 22px 18px 18px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.48)),
+    linear-gradient(135deg, var(--entity-overlay-header-background, rgba(37, 99, 235, 0.08)), rgba(255, 255, 255, 0.14));
+  border-bottom: 1px solid var(--entity-overlay-border, rgba(255, 255, 255, 0.86));
+}
+
+.entity-overlay-head.sheet-head {
+  cursor: default;
+}
+
+.entity-overlay-head-meta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.entity-overlay-body {
+  margin-top: 14px;
+}
+
 .entity-editor-head-tools {
   display: flex;
   align-items: center;
@@ -1625,6 +1669,10 @@ select:focus-visible {
   min-height: 32px;
   padding: 7px 10px;
   font-size: 0.84rem;
+}
+
+.entity-sheet-close {
+  min-width: 88px;
 }
 
 .entity-comment-input {
@@ -1928,6 +1976,8 @@ select:focus-visible {
 
 .entity-overlay-card .field-editor.compact {
   gap: 10px;
+  background: var(--entity-overlay-field-background, rgba(255, 255, 255, 0.7));
+  border-color: var(--entity-overlay-field-border, rgba(148, 163, 184, 0.26));
 }
 
 .entity-overlay-card .field-editor-head {
@@ -2001,6 +2051,22 @@ select:focus-visible {
   min-width: 0;
 }
 
+.entity-overlay-card .app-input {
+  background: color-mix(in srgb, rgba(255, 255, 255, 0.88) 78%, var(--entity-overlay-input-background, rgba(255, 255, 255, 0.12)) 22%);
+  border-color: var(--entity-overlay-input-border, rgba(191, 208, 228, 0.78));
+}
+
+.entity-overlay-card .app-input:focus {
+  border-color: var(--entity-overlay-accent, rgba(37, 99, 235, 0.42));
+  box-shadow:
+    0 0 0 4px var(--entity-overlay-focus-ring, rgba(37, 99, 235, 0.12)),
+    0 16px 28px color-mix(in srgb, var(--entity-overlay-shadow, rgba(37, 99, 235, 0.1)) 72%, rgba(15, 23, 42, 0.04) 28%);
+}
+
+.entity-overlay-card .checkbox-line {
+  color: color-mix(in srgb, var(--text-soft) 80%, var(--entity-overlay-accent, #93c5fd) 20%);
+}
+
 .relationship-drag-path {
   cursor: grab;
 }
@@ -2030,7 +2096,8 @@ select:focus-visible {
 
 @media (max-width: 860px) {
   .editor-screen {
-    padding: 12px;
+    padding: 10px;
+    gap: 10px;
   }
 
   .editor-title-row,
@@ -2038,19 +2105,148 @@ select:focus-visible {
   .editor-header-metrics,
   .editor-header-exports {
     align-items: stretch;
+    gap: 8px;
   }
 
   .editor-title-button,
   .editor-title-input-inline,
-  .compact-button,
   .sql-dialect-select {
     width: 100%;
+  }
+
+  .editor-header {
+    padding: 12px 13px;
+    gap: 12px;
+  }
+
+  .editor-header-right {
+    gap: 8px;
+    min-width: 0;
+    align-content: start;
+  }
+
+  .editor-title-button,
+  .editor-title-input-inline {
+    font-size: clamp(1.16rem, 4.8vw, 1.4rem);
+  }
+
+  .compact-button {
+    min-height: 34px;
+    padding: 8px 10px;
+    font-size: 0.84rem;
+  }
+
+  .app-input {
+    padding: 10px 12px;
+    font-size: 0.95rem;
+  }
+
+  .editor-layout-shell {
+    gap: 10px;
+  }
+
+  .editor-left-sidebar {
+    max-height: none;
+  }
+
+  .editor-sidebar-card.compact {
+    padding: 12px;
+    border-radius: 20px;
+  }
+
+  .sidebar-action-stack {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .sidebar-action-button {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .sidebar-action-divider,
+  .sidebar-guide {
+    grid-column: 1 / -1;
+  }
+
+  .sidebar-mode-switch {
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .sidebar-guide {
+    margin-top: 12px;
+    padding-top: 12px;
+  }
+
+  .sidebar-guide p {
+    font-size: 0.88rem;
+    line-height: 1.5;
+  }
+
+  .editor-inline-actions .compact-button,
+  .editor-header-metrics .compact-button,
+  .editor-header-exports .compact-button {
+    flex: 1 1 calc(50% - 4px);
+    width: auto;
+  }
+
+  .presence-chip {
+    flex: 1 1 180px;
+    min-width: 0;
   }
 
   .canvas-inspector {
     width: calc(100% - 24px);
     left: 12px;
     top: 12px;
+  }
+
+  .canvas-mobile-sheet {
+    padding: 8px;
+  }
+
+  .entity-overlay-card.mobile-bottom-sheet {
+    width: 100%;
+    max-width: 100%;
+    max-height: min(72vh, calc(100% - 18px));
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    border-radius: 24px 24px 18px 18px;
+    pointer-events: auto;
+    overflow: hidden;
+  }
+
+  .entity-overlay-card.mobile-bottom-sheet .entity-overlay-head {
+    margin: -16px -16px 0;
+    padding: 14px 16px 12px;
+    border-radius: 24px 24px 16px 16px;
+  }
+
+  .entity-overlay-card.mobile-bottom-sheet .entity-overlay-body {
+    overflow-y: auto;
+    padding-right: 2px;
+    margin-top: 12px;
+  }
+
+  .entity-overlay-head-meta {
+    justify-content: flex-start;
+  }
+
+  .entity-editor-head-tools {
+    gap: 10px;
+    justify-content: flex-start;
+  }
+
+  .entity-editor-head-actions,
+  .entity-color-picker {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .entity-editor-head-actions .entity-head-button {
+    flex: 1 1 calc(50% - 4px);
   }
 
   .relationship-popup {
