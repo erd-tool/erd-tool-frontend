@@ -504,6 +504,7 @@ export function EditorPage() {
   const [relationshipPopupPosition, setRelationshipPopupPosition] = useState<OverlayPosition>({ x: 18, y: 18 });
   const canvasFrameRef = useRef<HTMLDivElement | null>(null);
   const suppressRelationshipSelectionUntilRef = useRef(0);
+  const suppressPaneClearUntilRef = useRef(0);
   const dragStateRef = useRef<{
     target: 'inspector' | 'relationship' | null;
     offsetX: number;
@@ -514,8 +515,6 @@ export function EditorPage() {
 
   function clearCanvasSelection() {
     setSelectedEntityId(null);
-    setSelectedRelationshipId(null);
-    setSelectedNoteId(null);
   }
 
   useEffect(() => {
@@ -682,9 +681,7 @@ export function EditorPage() {
           return;
         }
         if (selectedEntityId || selectedRelationshipId || selectedNoteId) {
-          setSelectedEntityId(null);
-          setSelectedRelationshipId(null);
-          setSelectedNoteId(null);
+          clearCanvasSelection();
         }
         return;
       }
@@ -913,10 +910,9 @@ export function EditorPage() {
 
   function handleNodeSelection(nodeId: string) {
     if (readOnlyView) return;
+    suppressPaneClearUntilRef.current = window.performance.now() + 180;
     if (!relationshipDraft.active) {
       setSelectedEntityId(nodeId);
-      setSelectedRelationshipId(null);
-      setSelectedNoteId(null);
       return;
     }
 
@@ -1201,11 +1197,17 @@ export function EditorPage() {
                   if (window.performance.now() < suppressRelationshipSelectionUntilRef.current) {
                     return;
                   }
-                  setSelectedEntityId(null);
-                  setSelectedNoteId(null);
+                  suppressPaneClearUntilRef.current = window.performance.now() + 180;
                   setSelectedRelationshipId(edge.id);
                 }}
-                onPaneClick={() => {
+                onPaneClick={(event) => {
+                  const target = event.target as HTMLElement | null;
+                  if (window.performance.now() < suppressPaneClearUntilRef.current) {
+                    return;
+                  }
+                  if (target?.closest('.react-flow__node') || target?.closest('.react-flow__edge') || target?.closest('.react-flow__handle')) {
+                    return;
+                  }
                   if (!relationshipDraft.active) {
                     clearCanvasSelection();
                   }
