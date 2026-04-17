@@ -37,8 +37,8 @@ jobs:
 
       - name: Build Frontend
         env:
-          VITE_API_BASE_URL: ""
-          VITE_COLLAB_URL: ""
+          VITE_API_BASE_URL: ${{ vars.FRONTEND_API_BASE_URL }}
+          VITE_COLLAB_URL: ${{ vars.FRONTEND_COLLAB_URL }}
         run: npm run build
 
       - name: Validate Deployment Variables
@@ -48,11 +48,15 @@ jobs:
           S3_BUCKET_NAME: ${{ vars.S3_BUCKET_NAME }}
           CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}
           S3_PREFIX: ${{ vars.S3_PREFIX }}
+          FRONTEND_API_BASE_URL: ${{ vars.FRONTEND_API_BASE_URL }}
+          FRONTEND_COLLAB_URL: ${{ vars.FRONTEND_COLLAB_URL }}
         run: |
           test -n "$AWS_REGION" || (echo "Missing vars.AWS_REGION" && exit 1)
           test -n "$AWS_ROLE_ARN" || (echo "Missing vars.AWS_ROLE_ARN" && exit 1)
           test -n "$S3_BUCKET_NAME" || (echo "Missing vars.S3_BUCKET_NAME" && exit 1)
           test -n "$CLOUDFRONT_DISTRIBUTION_ID" || (echo "Missing vars.CLOUDFRONT_DISTRIBUTION_ID" && exit 1)
+          test -n "$FRONTEND_API_BASE_URL" || (echo "Missing vars.FRONTEND_API_BASE_URL" && exit 1)
+          test -n "$FRONTEND_COLLAB_URL" || (echo "Missing vars.FRONTEND_COLLAB_URL" && exit 1)
           echo "Using prefix: ${S3_PREFIX:-<root>}"
 
       - name: Configure AWS Credentials

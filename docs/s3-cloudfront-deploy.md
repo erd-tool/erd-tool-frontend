@@ -8,13 +8,13 @@
 - upload target: private S3 bucket
 - delivery: CloudFront
 - invalidation: `/`, `/index.html`
-- API base URL: same-origin 유지
-- collaboration URL: same-origin 유지
+- API base URL: GitHub Variables로 주입
+- collaboration URL: GitHub Variables로 주입
 
 workflow에서는 아래 값을 고정합니다.
 
-- `VITE_API_BASE_URL=""`
-- `VITE_COLLAB_URL=""`
+- `VITE_API_BASE_URL=${{ vars.FRONTEND_API_BASE_URL }}`
+- `VITE_COLLAB_URL=${{ vars.FRONTEND_COLLAB_URL }}`
 
 ## Required GitHub Variables
 
@@ -25,6 +25,8 @@ Repository `Variables`에 아래 값을 설정합니다.
 - `S3_BUCKET_NAME`: 정적 파일을 올릴 bucket 이름
 - `CLOUDFRONT_DISTRIBUTION_ID`: 배포 대상 CloudFront distribution id
 - `S3_PREFIX`: 선택값. bucket 루트가 아닌 특정 prefix로 배포할 때만 사용
+- `FRONTEND_API_BASE_URL`: 예) `https://<alb-dns>` 또는 `https://api.<domain>`
+- `FRONTEND_COLLAB_URL`: 예) `wss://<alb-dns>/ws/collaboration` 또는 `wss://api.<domain>/ws/collaboration`
 
 ## Recommended AWS Auth
 
@@ -105,3 +107,4 @@ GitHub Actions에서는 장기 Access Key 대신 OIDC Assume Role 방식을 사�
 - S3 bucket은 private + CloudFront OAC 구성을 권장합니다.
 - SPA 새로고침 처리는 CloudFront custom error response에서 `403/404 -> /index.html (200)`로 처리합니다.
 - 도메인이 없어도 CloudFront 기본 도메인으로 먼저 배포할 수 있습니다.
+- 백엔드를 ALB로 먼저 올린 뒤, ALB DNS를 `FRONTEND_API_BASE_URL`, `FRONTEND_COLLAB_URL`에 넣어 1차 배포하는 방식을 권장합니다.
