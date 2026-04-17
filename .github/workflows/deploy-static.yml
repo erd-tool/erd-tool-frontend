@@ -1,0 +1,71 @@
+name: Deploy Static Frontend
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: frontend-static-production
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy To S3 And CloudFront
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v6
+
+      - name: Set Up Node 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Build Frontend
+        env:
+          VITE_API_BASE_URL: ""
+          VITE_COLLAB_URL: ""
+        run: npm run build
+
+      - name: Validate Deployment Variables
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+          S3_BUCKET_NAME: ${{ vars.S3_BUCKET_NAME }}
+          CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}
+          S3_PREFIX: ${{ vars.S3_PREFIX }}
+        run: |
+          test -n "$AWS_REGION" || (echo "Missing vars.AWS_REGION" && exit 1)
+          test -n "$AWS_ROLE_ARN" || (echo "Missing vars.AWS_ROLE_ARN" && exit 1)
+          test -n "$S3_BUCKET_NAME" || (echo "Missing vars.S3_BUCKET_NAME" && exit 1)
+          test -n "$CLOUDFRONT_DISTRIBUTION_ID" || (echo "Missing vars.CLOUDFRONT_DISTRIBUTION_ID" && exit 1)
+          echo "Using prefix: ${S3_PREFIX:-<root>}"
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          aws-region: ${{ vars.AWS_REGION }}
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          role-session-name: frontend-static-${{ github.run_id }}
+
+      - name: Upload To S3 And Invalidate CloudFront
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          S3_BUCKET_NAME: ${{ vars.S3_BUCKET_NAME }}
+          CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}
+          S3_PREFIX: ${{ vars.S3_PREFIX }}
+        run: ./scripts/deploy-static.sh
